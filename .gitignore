@@ -1,0 +1,29 @@
+# Dependencies & build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Secrets / local env
+.env
+.env.*
+worker/.dev.vars
+
+# Local-only agentic harness & planning artifacts (workspace mandate §7)
+conductor/
+CLAUDE.md
+STRATEGY.md
+WORKFLOW.md
+bootstrap.ps1
+mach.exe
+english.md
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+*.local
+
+# Personal data — listening-history exports must never be committed
+my_spotify_data/
+*.zip
+fixtures-real/
