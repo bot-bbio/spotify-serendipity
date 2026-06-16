@@ -18,6 +18,9 @@ bootstrap.ps1
 mach.exe
 english.md
 
+# Internal security reports — keep findings local-only (workspace mandate §9)
+SECURITY_AUDIT.md
+
 # Editor / OS noise
 .DS_Store
 .vscode/

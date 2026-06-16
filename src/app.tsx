@@ -36,6 +36,7 @@ export function App() {
   const [param, setParam] = useState<string | number | undefined>(undefined);
 
   const [result, setResult] = useState<Candidate | null>(null);
+  const [resultUri, setResultUri] = useState<string | undefined>(undefined);
   const [noMatch, setNoMatch] = useState(false);
 
   const descriptors = useMemo(() => descriptorsFor(entity), [entity]);
@@ -76,6 +77,7 @@ export function App() {
     const candidates = d.run(engine, { entity, param });
     const pick = weightedPick(candidates, (c) => Math.max(1, c.count), rng(Date.now()));
     setResult(pick ?? null);
+    setResultUri(pick ? engine.representativeUri(pick) : undefined);
     setNoMatch(!pick);
   }
 
@@ -187,7 +189,7 @@ export function App() {
             🎲 Surprise me
           </button>
 
-          {result && <ResultCard c={result} />}
+          {result && <ResultCard c={result} playUri={resultUri} />}
           {noMatch && !result && <p class="muted">No match for that one — try another phrase.</p>}
 
           <footer>
@@ -255,8 +257,8 @@ function ParamControl({
   );
 }
 
-function ResultCard({ c }: { c: Candidate }) {
-  const url = spotifyUrl(c.uri);
+function ResultCard({ c, playUri }: { c: Candidate; playUri?: string }) {
+  const url = spotifyUrl(playUri);
   return (
     <article class="card">
       <div class="kind">{c.kind}</div>

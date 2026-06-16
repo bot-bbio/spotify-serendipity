@@ -23,7 +23,6 @@ function gen(artist: string, n: number, o: GenOpts): PlayEvent[] {
     track,
     trackUri: `spotify:track:${artist}_${track}`.replace(/\s/g, '').toLowerCase(),
     album: `${artist} album`,
-    source: 'export' as const,
     reasonEnd: o.reasonEnd ?? 'trackdone',
     country: o.country,
     platform: o.platform,
@@ -143,5 +142,22 @@ describe('listening-behavior queries', () => {
       ...gen('Desktop', 3, { startMs: Date.UTC(2022, 6, 1), platform: 'OS X' }),
     ]);
     expect(labels(e.byPlatform({ entity: 'artist', platform: 'iOS' }))).toEqual(['Mobile']);
+  });
+});
+
+describe('representativeUri (playback target)', () => {
+  const e = buildEngine([
+    ...gen('Rep', 3, { startMs: Date.UTC(2022, 0, 1), track: 'Hit' }),
+    ...gen('Rep', 1, { startMs: Date.UTC(2022, 6, 1), track: 'Obscure' }),
+  ]);
+
+  it('resolves an artist to its most-played track URI', () => {
+    const [artist] = e.mileage({ entity: 'artist' });
+    expect(e.representativeUri(artist)).toBe('spotify:track:rep_hit');
+  });
+
+  it('resolves a track to its own URI', () => {
+    const top = e.mileage({ entity: 'track' })[0];
+    expect(e.representativeUri(top)).toBe(top.uri);
   });
 });

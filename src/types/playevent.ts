@@ -1,23 +1,19 @@
 /**
- * The canonical, source-agnostic listening event. Both the bulk GDPR export
- * (Path B) and the live `recently-played` poll (Path C) normalize into this shape
- * so the engine never needs to know where a play came from.
+ * A single listening event, normalized from the GDPR "Extended Streaming History"
+ * export. This is the one shape the entire engine operates on.
  */
 export interface PlayEvent {
   /** ISO 8601 timestamp of the play. */
   ts: string;
-  /** Milliseconds actually listened (export: exact; live: estimated). */
+  /** Milliseconds actually listened. */
   msPlayed: number;
   artist: string;
-  /** spotify:artist:... — not present in the export (track URI only). */
-  artistUri?: string;
   track: string;
-  /** spotify:track:... — primary identity and dedup key. */
+  /** spotify:track:... — identity, dedup key, and the target we play. */
   trackUri: string;
   album?: string;
-  source: Source;
 
-  // --- Behavioral context: present on export events only (the live poll lacks these).
+  // --- Behavioral context from the export (may be absent on older export vintages).
   /** trackdone | fwdbtn | backbtn | clickrow | playbtn | … */
   reasonStart?: string;
   /** trackdone | fwdbtn | endplay | … */
@@ -28,8 +24,6 @@ export interface PlayEvent {
   /** conn_country (ISO-3166-1 alpha-2). */
   country?: string;
 }
-
-export type Source = 'export' | 'live';
 
 /** The three granularities every applicable query can operate over. */
 export type Entity = 'track' | 'album' | 'artist';

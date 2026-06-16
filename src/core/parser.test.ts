@@ -26,7 +26,6 @@ describe('parseExport', () => {
       track: 'Nude',
       trackUri: 'spotify:track:abc',
       album: 'In Rainbows',
-      source: 'export',
       reasonEnd: 'trackdone',
       shuffle: false,
       platform: 'iOS 17.2',

@@ -257,6 +257,34 @@ export class Engine {
     );
   }
 
+  // ---- playback -----------------------------------------------------------
+
+  /**
+   * A directly-playable `spotify:track:` URI for any candidate: a track plays
+   * itself; an artist or album plays its most-played track in the user's own
+   * history. Lets us start playback (deep-link or Web Playback SDK) for every pick
+   * without a single extra API call, since the export already gives us track URIs.
+   */
+  representativeUri(c: Candidate): string | undefined {
+    if (c.kind === 'track') return c.uri;
+    const stat = this.idx[c.kind].get(c.id);
+    if (!stat) return undefined;
+    const counts = new Map<number, number>();
+    for (const i of stat.events) {
+      const tid = this.ds.columns.trackId[i];
+      counts.set(tid, (counts.get(tid) ?? 0) + 1);
+    }
+    let best = -1;
+    let bestN = -1;
+    for (const [tid, nPlays] of counts) {
+      if (nPlays > bestN) {
+        bestN = nPlays;
+        best = tid;
+      }
+    }
+    return best >= 0 ? this.ds.dicts.tracks[best].uri : undefined;
+  }
+
   // ---- internals ----------------------------------------------------------
 
   private entityStats(kind: EntityKind): EntityStat[] {

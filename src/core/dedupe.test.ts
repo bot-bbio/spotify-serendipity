@@ -6,7 +6,6 @@ const base = (over: Partial<PlayEvent> & Pick<PlayEvent, 'ts' | 'trackUri'>): Pl
   msPlayed: 120_000,
   artist: 'A',
   track: 'T',
-  source: 'export',
   ...over,
 });
 
@@ -28,13 +27,12 @@ describe('mergeDedupe', () => {
     expect(out).toHaveLength(3);
   });
 
-  it('sorts ascending and prefers the export record over a live duplicate', () => {
+  it('sorts ascending and collapses duplicates regardless of input order', () => {
     const out = mergeDedupe([
       base({ ts: '2023-01-02T00:00:00Z', trackUri: 'spotify:track:z' }),
-      base({ ts: '2023-01-01T00:00:05Z', trackUri: 'spotify:track:x', source: 'live' }),
-      base({ ts: '2023-01-01T00:00:00Z', trackUri: 'spotify:track:x', source: 'export' }),
+      base({ ts: '2023-01-01T00:00:05Z', trackUri: 'spotify:track:x' }),
+      base({ ts: '2023-01-01T00:00:00Z', trackUri: 'spotify:track:x' }),
     ]);
     expect(out.map((e) => e.ts)).toEqual(['2023-01-01T00:00:00Z', '2023-01-02T00:00:00Z']);
-    expect(out[0].source).toBe('export');
   });
 });

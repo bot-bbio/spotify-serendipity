@@ -39,7 +39,6 @@ ctx.onmessage = async (e: MessageEvent<ImportRequest>): Promise<void> => {
       c.shuffle.buffer,
       c.platform.buffer,
       c.country.buffer,
-      c.source.buffer,
     ];
     post({ type: 'done', dataset, events: c.n }, transfer);
   } catch (err) {

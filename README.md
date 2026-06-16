@@ -19,20 +19,18 @@ your device and lets you query it.
 
 - **Standalone client-side PWA** — your data never leaves the browser. Parsed into a
   compact columnar store in IndexedDB; queried against a precomputed stats index.
-- **Optional live enrichment** (Authorization Code + PKCE) for artist art, genres, and
-  in-app playback.
-- **Optional forward capture** — a Cloudflare Worker can poll *recently played* on a
-  schedule so the dataset stays fresh after the one-time export.
+- **Listen to any pick** — open it in the Spotify app via a deep link, or play the full
+  track in-browser with the Web Playback SDK (Spotify Premium).
+- **Optional enrichment** (Authorization Code + PKCE) for artist artwork and genres.
 
 ## Data flow
 
 ```
-Export .json  ─┐
-Live poll     ─┼─▶ normalize ─▶ PlayEvent[] ─▶ columnar store (IndexedDB)
-               ┘                                    │
-                                       stats index (materialized)
-                                                    │
-                                     serendipity query engine ─▶ mad-lib UI
+Export .json ─▶ normalize ─▶ PlayEvent[] ─▶ columnar store (IndexedDB)
+                                                 │
+                                    stats index (materialized)
+                                                 │
+                          serendipity engine ─▶ mad-lib UI ─▶ ▶ play (in-app / in-browser)
 ```
 
 ## Getting started
@@ -52,4 +50,5 @@ npm run dev     # start the app (runs on synthetic data until you import an expo
 
 ## Project status
 
-Phase 1 (offline engine) under construction. See the test suite for verified behavior.
+Phase 1 (offline engine + mad-lib UI + deep-link play) complete — 26 passing tests.
+Phase 2 (PKCE auth + in-browser Web Playback SDK + enrichment) is next.

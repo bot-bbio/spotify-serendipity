@@ -5,11 +5,11 @@ import { build } from './pipeline.js';
 const day = (n: number): string => new Date(Date.UTC(2022, 5, n, 12)).toISOString();
 
 const events: PlayEvent[] = [
-  { ts: day(1), msPlayed: 120_000, artist: 'X', track: 'T1', trackUri: 'spotify:track:t1', album: 'XA', source: 'export', reasonEnd: 'trackdone' },
-  { ts: day(2), msPlayed: 120_000, artist: 'X', track: 'T1', trackUri: 'spotify:track:t1', album: 'XA', source: 'export', reasonEnd: 'trackdone' },
-  { ts: day(3), msPlayed: 5_000, artist: 'X', track: 'T1', trackUri: 'spotify:track:t1', album: 'XA', source: 'export', reasonEnd: 'fwdbtn' },
-  { ts: day(4), msPlayed: 200_000, artist: 'X', track: 'T2', trackUri: 'spotify:track:t2', album: 'XA', source: 'export', reasonEnd: 'trackdone' },
-  { ts: day(5), msPlayed: 90_000, artist: 'Y', track: 'U1', trackUri: 'spotify:track:u1', album: 'YA', source: 'export', reasonEnd: 'trackdone' },
+  { ts: day(1), msPlayed: 120_000, artist: 'X', track: 'T1', trackUri: 'spotify:track:t1', album: 'XA', reasonEnd: 'trackdone' },
+  { ts: day(2), msPlayed: 120_000, artist: 'X', track: 'T1', trackUri: 'spotify:track:t1', album: 'XA', reasonEnd: 'trackdone' },
+  { ts: day(3), msPlayed: 5_000, artist: 'X', track: 'T1', trackUri: 'spotify:track:t1', album: 'XA', reasonEnd: 'fwdbtn' },
+  { ts: day(4), msPlayed: 200_000, artist: 'X', track: 'T2', trackUri: 'spotify:track:t2', album: 'XA', reasonEnd: 'trackdone' },
+  { ts: day(5), msPlayed: 90_000, artist: 'Y', track: 'U1', trackUri: 'spotify:track:u1', album: 'YA', reasonEnd: 'trackdone' },
 ];
 
 describe('buildIndex', () => {

@@ -4,7 +4,7 @@ import { decode, encode } from './columnar.js';
 import { mergeDedupe } from './dedupe.js';
 
 describe('columnar encode/decode', () => {
-  it('round-trips a timeline losslessly (minus the unused artistUri)', () => {
+  it('round-trips a timeline losslessly', () => {
     const events: PlayEvent[] = [
       {
         ts: new Date(Date.UTC(2021, 4, 1, 10)).toISOString(),
@@ -13,7 +13,6 @@ describe('columnar encode/decode', () => {
         track: 'Archangel',
         trackUri: 'spotify:track:arch',
         album: 'Untrue',
-        source: 'export',
         reasonStart: 'clickrow',
         reasonEnd: 'trackdone',
         shuffle: true,
@@ -26,7 +25,6 @@ describe('columnar encode/decode', () => {
         artist: 'Four Tet',
         track: 'Angel Echoes',
         trackUri: 'spotify:track:angel',
-        source: 'live',
       },
     ];
     const merged = mergeDedupe(events);
@@ -41,7 +39,6 @@ describe('columnar encode/decode', () => {
       artist: 'Aphex Twin',
       track: 'Xtal',
       trackUri: 'spotify:track:xtal',
-      source: 'export' as const,
     }));
     const ds = encode(events);
     expect(ds.dicts.artists).toEqual(['Aphex Twin']);

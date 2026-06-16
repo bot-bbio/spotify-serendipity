@@ -53,7 +53,6 @@ export function makeSynthetic(count = 4000, seed = 1): PlayEvent[] {
       track,
       trackUri,
       album: artist.album,
-      source: 'export',
       reasonStart: rand() < 0.5 ? 'clickrow' : 'trackdone',
       reasonEnd,
       shuffle: rand() < 0.4,

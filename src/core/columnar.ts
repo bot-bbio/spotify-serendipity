@@ -41,7 +41,6 @@ export interface Columns {
   shuffle: Uint8Array; // 0 unknown, 1 false, 2 true
   platform: Uint16Array; // dict index, 0 = none
   country: Uint16Array; // dict index, 0 = none
-  source: Uint8Array; // 0 export, 1 live
 }
 
 export interface Dataset {
@@ -99,7 +98,6 @@ export function encode(events: readonly PlayEvent[]): Dataset {
     shuffle: new Uint8Array(n),
     platform: new Uint16Array(n),
     country: new Uint16Array(n),
-    source: new Uint8Array(n),
   };
 
   for (let i = 0; i < n; i++) {
@@ -123,7 +121,6 @@ export function encode(events: readonly PlayEvent[]): Dataset {
     columns.shuffle[i] = e.shuffle === undefined ? 0 : e.shuffle ? 2 : 1;
     columns.platform[i] = platformI.internOpt(e.platform);
     columns.country[i] = countryI.internOpt(e.country);
-    columns.source[i] = e.source === 'live' ? 1 : 0;
   }
 
   return { columns, dicts };
@@ -141,7 +138,6 @@ export function decode(ds: Dataset): PlayEvent[] {
       artist: dicts.artists[track.artistId],
       track: track.name,
       trackUri: track.uri,
-      source: c.source[i] === 1 ? 'live' : 'export',
     };
     if (track.album !== null) ev.album = track.album;
     if (c.reasonStart[i] !== 0) ev.reasonStart = dicts.reasons[c.reasonStart[i]];

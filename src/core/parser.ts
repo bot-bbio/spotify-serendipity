@@ -38,7 +38,6 @@ export function parseExport(records: readonly RawExportRecord[]): PlayEvent[] {
       track: r.master_metadata_track_name as string,
       trackUri: r.spotify_track_uri as string,
       album: r.master_metadata_album_album_name ?? undefined,
-      source: 'export',
       reasonStart: r.reason_start ?? undefined,
       reasonEnd: r.reason_end ?? undefined,
       shuffle: r.shuffle ?? undefined,
