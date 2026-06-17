@@ -45,4 +45,32 @@ describe('columnar encode/decode', () => {
     expect(ds.dicts.tracks).toHaveLength(1);
     expect(ds.columns.n).toBe(50);
   });
+
+  // VULN-003: the reason column is a Uint8Array, so >255 distinct reason values
+  // would overflow the dict index and silently mis-map (id 256 -> 0). Encoding must
+  // fail closed instead. Real exports have ~10 reasons; 256 means malformed/hostile.
+  it('rejects a reason dictionary wider than its Uint8 column', () => {
+    const events: PlayEvent[] = Array.from({ length: 256 }, (_, i) => ({
+      ts: new Date(Date.UTC(2022, 0, 1) + i * 1000).toISOString(),
+      msPlayed: 1000,
+      artist: 'A',
+      track: `T${i}`,
+      trackUri: `spotify:track:t${i}`,
+      reasonStart: `reason-${i}`, // 256 distinct reasons + the reserved "none"
+    }));
+    expect(() => encode(events)).toThrow(/distinct reason/i);
+  });
+
+  it('accepts a reason dictionary that exactly fills the Uint8 column', () => {
+    // 255 distinct reasons + the reserved id-0 "none" = 256 ids, the column's max.
+    const events: PlayEvent[] = Array.from({ length: 255 }, (_, i) => ({
+      ts: new Date(Date.UTC(2022, 0, 1) + i * 1000).toISOString(),
+      msPlayed: 1000,
+      artist: 'A',
+      track: `T${i}`,
+      trackUri: `spotify:track:t${i}`,
+      reasonStart: `reason-${i}`,
+    }));
+    expect(() => encode(events)).not.toThrow();
+  });
 });

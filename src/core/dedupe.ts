@@ -9,6 +9,12 @@ const epoch = (e: PlayEvent): number => Date.parse(e.ts);
  * Sort all events ascending by timestamp and drop duplicates — the same `trackUri`
  * within `windowMs`. This keeps multi-file imports and re-imports idempotent, and
  * leaves the timeline in the ts-sorted order the columnar store expects.
+ *
+ * Worst case is O(N log N) for the sort plus O(N) for the pass. Because events are
+ * processed in ascending-ts order, the most recently *kept* play of a track is
+ * always the nearest in time, so a single map lookup decides duplication — there is
+ * no tail back-scan to degrade to O(N²) when thousands of plays share a timestamp
+ * (VULN-002).
  */
 export function mergeDedupe(
   events: readonly PlayEvent[],
@@ -16,21 +22,16 @@ export function mergeDedupe(
 ): PlayEvent[] {
   const sorted = [...events].sort((a, b) => epoch(a) - epoch(b));
   const kept: PlayEvent[] = [];
+  // trackUri -> epoch of its most recently kept play. The window is measured
+  // against the last *kept* play (not the last seen), matching the original
+  // back-scan that stopped at `kept` entries only.
+  const lastKept = new Map<string, number>();
   for (const ev of sorted) {
-    if (findDuplicate(kept, ev, windowMs) === -1) kept.push(ev);
+    const t = epoch(ev);
+    const prev = lastKept.get(ev.trackUri);
+    if (prev !== undefined && t - prev <= windowMs) continue; // duplicate within window
+    kept.push(ev);
+    lastKept.set(ev.trackUri, t);
   }
   return kept;
-}
-
-/**
- * Look back through the time-sorted tail for a same-track event within the window,
- * stopping as soon as we step outside it.
- */
-function findDuplicate(kept: PlayEvent[], ev: PlayEvent, windowMs: number): number {
-  const t = epoch(ev);
-  for (let i = kept.length - 1; i >= 0; i--) {
-    if (t - epoch(kept[i]) > windowMs) break;
-    if (kept[i].trackUri === ev.trackUri) return i;
-  }
-  return -1;
 }

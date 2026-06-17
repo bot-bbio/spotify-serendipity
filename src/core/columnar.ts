@@ -48,16 +48,34 @@ export interface Dataset {
   dicts: Dicts;
 }
 
-/** Intern helper: map a string to a stable integer id, growing the backing list. */
+/**
+ * Intern helper: map a string to a stable integer id, growing the backing list.
+ *
+ * `capacity` is the number of distinct ids the destination column can hold (e.g.
+ * 256 for a `Uint8Array` reason column). Exceeding it fails closed with a clear
+ * error instead of silently wrapping the id (id 256 -> 0) and mis-mapping the value
+ * (VULN-003). Domains with no narrow column (artists) pass `Infinity`.
+ */
 class Interner {
   private readonly map = new Map<string, number>();
-  constructor(private readonly list: string[], seedNone = false) {
+  constructor(
+    private readonly list: string[],
+    private readonly label: string,
+    private readonly capacity: number,
+    seedNone = false,
+  ) {
     if (seedNone) this.intern(''); // reserve id 0 for "none"
   }
   intern(s: string): number {
     let id = this.map.get(s);
     if (id === undefined) {
       id = this.list.length;
+      if (id >= this.capacity) {
+        throw new RangeError(
+          `Export has more than ${this.capacity} distinct ${this.label} values; ` +
+            `refusing to import (file looks malformed or corrupt).`,
+        );
+      }
       this.list.push(s);
       this.map.set(s, id);
     }
@@ -68,6 +86,10 @@ class Interner {
     return s == null ? 0 : this.intern(s);
   }
 }
+
+/** Distinct-id ceilings, matching the destination column's element width. */
+const UINT8_CAPACITY = 256; // Uint8Array reason columns
+const UINT16_CAPACITY = 65_536; // Uint16Array platform/country columns
 
 /**
  * Encode a timeline into the columnar form. Input is assumed time-sorted and
@@ -82,10 +104,11 @@ export function encode(events: readonly PlayEvent[]): Dataset {
     countries: [],
     reasons: [],
   };
-  const artistI = new Interner(dicts.artists);
-  const platformI = new Interner(dicts.platforms, true);
-  const countryI = new Interner(dicts.countries, true);
-  const reasonI = new Interner(dicts.reasons, true);
+  // artistId is a plain number in `dicts.tracks`, not a narrow column — no cap.
+  const artistI = new Interner(dicts.artists, 'artist', Infinity);
+  const platformI = new Interner(dicts.platforms, 'platform', UINT16_CAPACITY, true);
+  const countryI = new Interner(dicts.countries, 'country', UINT16_CAPACITY, true);
+  const reasonI = new Interner(dicts.reasons, 'reason', UINT8_CAPACITY, true);
   const trackIds = new Map<string, number>(); // trackUri -> trackId
 
   const columns: Columns = {

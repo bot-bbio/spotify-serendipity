@@ -33,7 +33,7 @@ export function parseExport(records: readonly RawExportRecord[]): PlayEvent[] {
     if (!isMusicRow(r)) continue;
     out.push({
       ts: r.ts,
-      msPlayed: r.ms_played ?? 0,
+      msPlayed: sanitizeMs(r.ms_played),
       artist: r.master_metadata_album_artist_name as string,
       track: r.master_metadata_track_name as string,
       trackUri: r.spotify_track_uri as string,
@@ -51,9 +51,26 @@ export function parseExport(records: readonly RawExportRecord[]): PlayEvent[] {
 function isMusicRow(r: RawExportRecord): boolean {
   return (
     typeof r.ts === 'string' &&
+    Number.isFinite(Date.parse(r.ts)) &&
     !!r.spotify_track_uri &&
     r.spotify_track_uri.startsWith('spotify:track:') &&
     !!r.master_metadata_track_name &&
     !!r.master_metadata_album_artist_name
   );
+}
+
+/** Upper bound for `ms_played`: the `Int32Array` column caps out here, so clamp
+ *  before the value reaches columnar encoding (`x | 0` would otherwise wrap a
+ *  hostile/huge number to a negative duration). ~24.8 days — far above any play. */
+const MAX_MS_PLAYED = 2_147_483_647;
+
+/**
+ * Coerce the untrusted `ms_played` into a safe, non-negative integer. Anything
+ * non-finite (missing, `null`, a string, `NaN`) becomes 0; negatives clamp to 0
+ * and oversized values clamp to the column's Int32 ceiling. This keeps a malformed
+ * or tampered export from silently corrupting durations downstream.
+ */
+function sanitizeMs(ms: unknown): number {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.min(Math.trunc(ms), MAX_MS_PLAYED);
 }
