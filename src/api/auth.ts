@@ -112,6 +112,15 @@ export function isLoggedIn(): boolean {
 }
 
 /**
+ * VULN-012: de-dupe concurrent refreshes. Without this, two callers racing while
+ * the access token is expired (e.g. the SDK warm-up and an enrichment fetch) each
+ * spend the same refresh token; if Spotify rotates it, whichever request loses the
+ * race gets `invalid_grant` and force-logs-out a session the other request just
+ * legitimately renewed. Sharing one in-flight promise makes them agree on one result.
+ */
+let refreshInFlight: Promise<string> | null = null;
+
+/**
  * A valid access token, refreshing silently if the in-memory one is missing or
  * expired and a refresh token is available. Throws `AuthError` when the user
  * must log in again.
@@ -119,9 +128,13 @@ export function isLoggedIn(): boolean {
 export async function getValidAccessToken(): Promise<string> {
   const current = getAccessToken();
   if (current) return current;
+  if (refreshInFlight) return refreshInFlight;
   const refresh = loadRefreshToken();
   if (!refresh) throw new AuthError('Not logged in to Spotify.');
-  return refreshAccessToken(refresh);
+  refreshInFlight = refreshAccessToken(refresh).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 /** Discard the in-memory access token, forcing the next call to refresh (e.g. after a 401). */
