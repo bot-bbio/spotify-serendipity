@@ -40,4 +40,33 @@ describe('buildIndex', () => {
       expect(ts).toEqual([...ts].sort((a, b) => a - b));
     }
   });
+
+  // Regression for the UTC-bucketing bug: time-of-day / weekday / day-of-year
+  // must reflect the user's *local* wall clock, not UTC, or "late-night",
+  // "on Sundays", and "on this day" queries land in the wrong bucket.
+  it('buckets hour / weekday / day-of-year by local time, not UTC', () => {
+    // Sanity-check that the suite TZ pin (src/test/setup.ts) is active: a summer
+    // date proves a constant UTC-5 (offset 300 min), distinguishing it from a
+    // DST zone. If this fails, the rest of the assertions are not meaningful.
+    expect(new Date('2022-07-01T00:00:00Z').getTimezoneOffset()).toBe(300);
+
+    // 03:00Z on 2022-06-01 is 22:00 on 2022-05-31 at UTC-5 — a different hour,
+    // weekday, and calendar day than the UTC reading would give.
+    const ts = Date.UTC(2022, 5, 1, 3, 0);
+    const d = new Date(ts);
+    const { index: idx } = build([
+      { ts: d.toISOString(), msPlayed: 120_000, artist: 'Z', track: 'Zt', trackUri: 'spotify:track:z', album: 'ZA', reasonEnd: 'trackdone' },
+    ]);
+    const stat = [...idx.artist.values()][0];
+
+    // Filed under the local bucket…
+    expect(stat.hour[d.getHours()]).toBe(1); // 22:00 local
+    expect(stat.weekday[d.getDay()]).toBe(1); // Tuesday (May 31)
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    expect(idx.dayOfYear.get(`${pad(d.getMonth() + 1)}-${pad(d.getDate())}`)).toHaveLength(1); // 05-31
+
+    // …and explicitly NOT the UTC bucket it would have landed in before the fix.
+    expect(stat.hour[d.getUTCHours()]).toBe(0); // not 03:00
+    expect(idx.dayOfYear.get('06-01')).toBeUndefined(); // not the UTC calendar day
+  });
 });

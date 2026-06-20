@@ -83,10 +83,14 @@ export class Engine {
       .map((s) => this.toCandidate(opts.entity, s));
   }
 
-  /** Entities played on this month-and-day in any past year. */
+  /**
+   * Entities played on this month-and-day in any past year. The month/day are
+   * read in local time to match how {@link buildIndex} buckets `dayOfYear`, so
+   * "on this day" means the user's local calendar day, not the UTC one.
+   */
   thisDayInHistory(opts: { entity: EntityKind; today?: number }): Candidate[] {
     const d = new Date(opts.today ?? this.now);
-    const mmdd = `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    const mmdd = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const indices = this.idx.dayOfYear.get(mmdd);
     if (!indices) return [];
     return this.candidatesFromIndices(opts.entity, indices);
@@ -121,7 +125,7 @@ export class Engine {
 
   // ---- Temporal-pattern family -------------------------------------------
 
-  /** Entities concentrated in an hour-of-day window (UTC), e.g. late-night. */
+  /** Entities concentrated in an hour-of-day window (local time), e.g. late-night. */
   byTimeOfDay(opts: { entity: EntityKind; fromHour: number; toHour: number; min?: number }): Candidate[] {
     const min = opts.min ?? 5;
     return this.entityStats(opts.entity)
@@ -134,7 +138,7 @@ export class Engine {
       .map((s) => this.toCandidate(opts.entity, s));
   }
 
-  /** Entities concentrated on a weekday (0 = Sunday, UTC). */
+  /** Entities concentrated on a weekday (0 = Sunday, local time). */
   byWeekday(opts: { entity: EntityKind; day: number; min?: number }): Candidate[] {
     const min = opts.min ?? 5;
     return this.entityStats(opts.entity)

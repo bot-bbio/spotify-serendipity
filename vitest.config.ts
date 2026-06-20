@@ -8,5 +8,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // Pin the timezone so local-time bucketing (statsIndex/serendipity) is
+    // deterministic on any machine. See src/test/setup.ts.
+    setupFiles: ['./src/test/setup.ts'],
   },
 });
