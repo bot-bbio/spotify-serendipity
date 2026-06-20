@@ -7,6 +7,7 @@ coverage/
 # Secrets / local env
 .env
 .env.*
+!.env.example
 worker/.dev.vars
 
 # Local-only agentic harness & planning artifacts (workspace mandate §7)

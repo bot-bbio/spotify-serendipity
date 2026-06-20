@@ -1,6 +1,6 @@
 # Serendipity
 
-A personal, mobile-first PWA that resurfaces a **random artist, album, or song from
+A personal, client-side PWA that resurfaces a **random artist, album, or song from
 your own Spotify listening past** based on simple, human criteria — "an artist I
 played a lot in 2021", "something I haven't heard in a year", "a song I always skip",
 "what I listened to on this day in past years". The serendipity comes from your own
@@ -50,5 +50,6 @@ npm run dev     # start the app (runs on synthetic data until you import an expo
 
 ## Project status
 
-Phase 1 (offline engine + mad-lib UI + deep-link play) complete — 26 passing tests.
-Phase 2 (PKCE auth + in-browser Web Playback SDK + enrichment) is next.
+Phases 1–2 complete — offline engine, mad-lib UI, and deep-link play, plus PKCE auth,
+in-browser Web Playback SDK, and artist/track enrichment. 52 passing tests. Phase 3
+(ship polish + GitHub Pages deploy) is in progress.

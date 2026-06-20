@@ -15,6 +15,14 @@ export function relTime(epoch: number, now: number = Date.now()): string {
   return `${(days / 365.25).toFixed(1)} years ago`;
 }
 
+/** Milliseconds as `m:ss` for the player scrubber, e.g. 75_000 → "1:15". */
+export function mmss(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 /** Turn a `spotify:track:ID` URI into an openable web link. */
 export function spotifyUrl(uri?: string): string | undefined {
   if (!uri) return undefined;

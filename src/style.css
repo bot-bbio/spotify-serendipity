@@ -1,12 +1,15 @@
 :root {
-  --bg: #0e1014;
-  --surface: #181c23;
-  --surface-2: #222732;
-  --text: #eef1f6;
-  --muted: #8b93a4;
+  --bg: #000000;
+  --surface: #121212;
+  --surface-2: #1c1c1c;
+  --surface-3: #2a2a2a; /* raised / hover */
+  --text: #ffffff;
+  --muted: #a7a7a7;
   --accent: #1db954;
   --accent-2: #1ed760;
+  --on-accent: #000000;
   --error: #ff6b6b;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
   color-scheme: dark;
 }
 
@@ -23,15 +26,50 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* A faint green glow at the top edge fading into pure black — depth, on-brand, no color noise. */
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(120% 55% at 50% -10%, rgba(30, 215, 96, 0.1), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
 .app {
   max-width: 620px;
   margin: 0 auto;
   padding: max(20px, env(safe-area-inset-top)) 20px 40px;
 }
 
+/* Safety net for the duplicate-root bug: if a second, inert App tree is ever
+   appended into #app (observed only on the Spotify Web Playback SDK path), keep
+   just the first, live one visible. A pure-CSS guard so it never touches the DOM
+   Preact owns. Becomes a no-op once the root cause is fixed. */
+#app > main.app ~ main.app {
+  display: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+code {
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+
+option {
+  background: var(--surface);
+  color: var(--text);
+}
+
 header h1 {
   margin: 0.2em 0 0;
   font-size: 1.9rem;
+  letter-spacing: -0.02em;
 }
 .tagline {
   margin: 0.2em 0 1.5em;
@@ -52,52 +90,141 @@ header h1 {
   border-radius: 16px;
   padding: 22px;
 }
-.onboard code {
-  background: var(--surface-2);
-  padding: 1px 6px;
-  border-radius: 6px;
-  font-size: 0.85em;
-}
 .filebtn {
   display: inline-block;
   margin: 14px 12px 6px 0;
-  padding: 12px 18px;
+  padding: 12px 20px;
   background: var(--accent);
-  color: #05210f;
+  color: var(--on-accent);
   font-weight: 700;
   border-radius: 999px;
   cursor: pointer;
+  transition: transform 0.12s var(--ease), background 0.15s ease;
+}
+.filebtn:hover {
+  background: var(--accent-2);
+  transform: scale(1.03);
+}
+.filebtn:active {
+  transform: scale(0.97);
 }
 .filebtn input {
   display: none;
 }
 .ghost {
   background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--surface-2);
-  padding: 12px 18px;
+  color: var(--text);
+  border: 1px solid var(--surface-3);
+  padding: 12px 20px;
   border-radius: 999px;
   cursor: pointer;
+  transition: transform 0.12s var(--ease), border-color 0.15s ease, background 0.15s ease;
+}
+.ghost:hover {
+  border-color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.ghost:active {
+  transform: scale(0.97);
 }
 
 /* Mad-lib */
 .madlib {
+  margin: 10px 0 24px;
+}
+.lead-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   font-size: 1.25rem;
-  line-height: 2.2;
-  margin: 10px 0 24px;
 }
 .lead {
   color: var(--muted);
+}
+.field-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin: 18px 0 8px;
+}
+
+/* Group: horizontal segmented control */
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 5px;
+}
+.seg {
+  flex: 1 1 auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.18s var(--ease), color 0.18s ease;
+}
+.seg:hover {
+  color: var(--text);
+}
+.seg[aria-selected='true'] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Criterion: wrapping chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.98rem;
+  padding: 9px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+    transform 0.12s var(--ease);
+}
+.chip:hover {
+  background: var(--surface-3);
+}
+.chip:active {
+  transform: scale(0.97);
+}
+.chip[aria-selected='true'] {
+  border-color: var(--accent-2);
+  background: rgba(30, 215, 96, 0.14);
+  color: var(--accent-2);
+  font-weight: 600;
+}
+
+.sentence {
+  margin: 22px 0 0;
+  font-size: 1.2rem;
+  line-height: 2;
 }
 .pill {
   display: inline-flex;
   background: var(--surface-2);
   border-radius: 999px;
   padding: 2px 4px;
+  transition: background 0.15s ease;
+}
+.pill:hover {
+  background: var(--surface-3);
 }
 .pill select,
 .pill input {
@@ -121,14 +248,21 @@ header h1 {
   padding: 16px;
   font-size: 1.1rem;
   font-weight: 700;
-  color: #05210f;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  letter-spacing: 0.01em;
+  color: var(--on-accent);
+  background: var(--accent);
   border: none;
-  border-radius: 14px;
+  border-radius: 999px;
   cursor: pointer;
+  transition: transform 0.12s var(--ease), background 0.15s ease, box-shadow 0.2s ease;
+}
+.surprise:hover {
+  background: var(--accent-2);
+  transform: scale(1.02);
+  box-shadow: 0 8px 28px rgba(30, 215, 96, 0.28);
 }
 .surprise:active {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 
 /* Result card */
@@ -138,17 +272,26 @@ header h1 {
   border: 1px solid var(--surface-2);
   border-radius: 16px;
   padding: 24px;
-  animation: rise 0.25s ease;
+  animation: rise 0.22s var(--ease);
 }
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
     transform: none;
   }
+}
+.card .art {
+  display: block;
+  width: 132px;
+  height: 132px;
+  border-radius: 10px;
+  object-fit: cover;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .card .kind {
   text-transform: uppercase;
@@ -156,9 +299,16 @@ header h1 {
   font-size: 0.72rem;
   color: var(--muted);
 }
+.card .genres {
+  margin: 4px 0 0;
+  color: var(--accent-2);
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
 .card h2 {
   margin: 4px 0;
   font-size: 1.7rem;
+  letter-spacing: -0.01em;
 }
 .card .by {
   margin: 0;
@@ -168,12 +318,173 @@ header h1 {
   color: var(--muted);
   font-size: 0.92rem;
 }
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
 .play {
-  display: inline-block;
-  margin-top: 8px;
   color: var(--accent-2);
   text-decoration: none;
   font-weight: 600;
+  transition: color 0.15s ease;
+}
+.play:hover {
+  color: var(--text);
+}
+.play-here {
+  padding: 10px 20px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.98rem;
+  transition: transform 0.12s var(--ease), background 0.15s ease;
+}
+.play-here:hover {
+  background: var(--accent-2);
+  transform: scale(1.04);
+}
+.play-here:active {
+  transform: scale(0.97);
+}
+.premium-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+}
+
+/* Spotify connect */
+.connect {
+  width: 100%;
+  padding: 14px;
+  margin-top: 14px;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease), background 0.15s ease;
+}
+.connect:hover {
+  background: var(--accent-2);
+  transform: scale(1.01);
+}
+.connect:active {
+  transform: scale(0.99);
+}
+.spotify-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.spotify-status .connected {
+  color: var(--accent-2);
+}
+.small {
+  font-size: 0.85rem;
+  margin-top: 14px;
+}
+
+/* Fixed player bar — frosted glass over black */
+.playerbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: rgba(18, 18, 18, 0.85);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-top: 1px solid var(--surface-2);
+  animation: rise 0.22s var(--ease);
+}
+.pb-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: none;
+}
+.pb-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pb-meta {
+  min-width: 0;
+}
+.pb-scrub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pb-time {
+  flex: none;
+  min-width: 34px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pb-time:last-child {
+  text-align: right;
+}
+.pb-seek {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.pb-title,
+.pb-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pb-title {
+  font-weight: 600;
+}
+.pb-artist {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.pb-toggle {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease), background 0.15s ease;
+}
+.pb-toggle:hover {
+  background: var(--accent-2);
+  transform: scale(1.06);
+}
+.pb-toggle:active {
+  transform: scale(0.94);
+}
+.pb-spacer {
+  height: 84px;
 }
 
 footer {
@@ -189,4 +500,17 @@ footer {
   color: var(--muted);
   text-decoration: underline;
   cursor: pointer;
+  transition: color 0.15s ease;
+}
+.link:hover {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

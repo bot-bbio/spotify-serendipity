@@ -8,7 +8,9 @@ import { buildIndex } from './core/statsIndex.js';
 import { clearDataset, loadDataset, saveDataset } from './db/store.js';
 import { makeSynthetic } from './fixtures/synthetic.js';
 import type { Entity } from './types/playevent.js';
-import { hours, relTime, spotifyUrl } from './ui/format.js';
+import { type Enrichment, useEnrichment } from './ui/useEnrichment.js';
+import { hours, mmss, relTime, spotifyUrl } from './ui/format.js';
+import { type SpotifyHook, useSpotify } from './ui/useSpotify.js';
 import type { ImportResponse } from './workers/protocol.js';
 
 type Status = 'loading' | 'empty' | 'importing' | 'ready';
@@ -39,7 +41,14 @@ export function App() {
   const [resultUri, setResultUri] = useState<string | undefined>(undefined);
   const [noMatch, setNoMatch] = useState(false);
 
+  const spotify = useSpotify();
+  const enrichment = useEnrichment(spotify.status === 'connected', result?.kind, resultUri);
+
   const descriptors = useMemo(() => descriptorsFor(entity), [entity]);
+  const groups = useMemo(() => groupBy(descriptors), [descriptors]);
+  const active = REGISTRY_BY_ID.get(criterionId);
+  const activeGroup = active?.group;
+  const groupItems = groups.find(([g]) => g === activeGroup)?.[1] ?? descriptors;
 
   // Restore a previously imported dataset on first load.
   useEffect(() => {
@@ -68,6 +77,12 @@ export function App() {
     const d = REGISTRY_BY_ID.get(id);
     if (d) setParam(defaultParam(d));
     setResult(null);
+  }
+
+  /** Selecting a group jumps to its first criterion (the group is just a filter). */
+  function chooseGroup(g: string) {
+    const items = groups.find(([name]) => name === g)?.[1];
+    if (items && items.length > 0) chooseCriterion(items[0].id);
   }
 
   function surprise() {
@@ -160,37 +175,82 @@ export function App() {
       {status === 'ready' && engine && (
         <>
           <section class="madlib">
-            <span class="lead">Show me</span>
-            <Pill>
-              <select
-                value={entity}
-                onChange={(e) => chooseEntity((e.currentTarget as HTMLSelectElement).value as Entity)}
-              >
-                {ENTITIES.map((o) => (
-                  <option value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </Pill>
-            <Pill>
-              <select value={criterionId} onChange={(e) => chooseCriterion((e.currentTarget as HTMLSelectElement).value)}>
-                {groupBy(descriptors).map(([group, items]) => (
-                  <optgroup label={group}>
-                    {items.map((d) => (
-                      <option value={d.id}>{phraseLabel(d)}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </Pill>
-            <ParamControl descriptor={REGISTRY_BY_ID.get(criterionId)} value={param} onChange={setParam} />
+            <div class="lead-row">
+              <span class="lead">Show me</span>
+              <Pill>
+                <select
+                  value={entity}
+                  onChange={(e) => chooseEntity((e.currentTarget as HTMLSelectElement).value as Entity)}
+                >
+                  {ENTITIES.map((o) => (
+                    <option value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </Pill>
+            </div>
+
+            <div class="field-label">Group</div>
+            <div class="segmented" role="tablist">
+              {groups.map(([g]) => (
+                <button
+                  type="button"
+                  class="seg"
+                  role="tab"
+                  aria-selected={g === activeGroup ? 'true' : 'false'}
+                  onClick={() => chooseGroup(g)}
+                >
+                  {g}
+                </button>
+              ))}
+            </div>
+
+            <div class="field-label">Criterion</div>
+            <div class="chips">
+              {groupItems.map((d) => (
+                <button
+                  type="button"
+                  class="chip"
+                  aria-selected={d.id === criterionId ? 'true' : 'false'}
+                  onClick={() => chooseCriterion(d.id)}
+                >
+                  {phraseLabel(d)}
+                </button>
+              ))}
+            </div>
+
+            <MadlibSentence entity={entity} descriptor={active} param={param} onParam={setParam} />
           </section>
 
           <button class="surprise" onClick={surprise}>
             🎲 Surprise me
           </button>
 
-          {result && <ResultCard c={result} playUri={resultUri} />}
+          <SpotifyConnect s={spotify} />
+          {spotify.error && <p class="error">{spotify.error}</p>}
+
+          {result && (
+            <ResultCard
+              c={result}
+              playUri={resultUri}
+              enrichment={enrichment}
+              canPlayHere={spotify.status === 'connected'}
+              premiumRequired={spotify.premiumRequired}
+              onPlayHere={spotify.play}
+            />
+          )}
           {noMatch && !result && <p class="muted">No match for that one — try another phrase.</p>}
+
+          {spotify.current && (
+            <>
+              <div class="pb-spacer" />
+              <PlayerBar
+                state={spotify.current}
+                position={spotify.position}
+                onToggle={spotify.toggle}
+                onSeek={spotify.seek}
+              />
+            </>
+          )}
 
           <footer>
             <span class="muted">
@@ -257,22 +317,161 @@ function ParamControl({
   );
 }
 
-function ResultCard({ c, playUri }: { c: Candidate; playUri?: string }) {
+/**
+ * The assembled query as a live mad-lib sentence. For criteria with an inline
+ * blank ({date}/{year}/{duration}) the param control is rendered in place, so the
+ * sentence both reads naturally and is where the blank is edited.
+ */
+function MadlibSentence({
+  entity,
+  descriptor,
+  param,
+  onParam,
+}: {
+  entity: Entity;
+  descriptor: QueryDescriptor | undefined;
+  param: string | number | undefined;
+  onParam: (v: string | number) => void;
+}) {
+  if (!descriptor) return null;
+  const lead = `Show me ${entityLabel(entity)} `;
+  if (descriptor.param === 'none') {
+    return (
+      <p class="sentence">
+        {lead}
+        {descriptor.phrase}.
+      </p>
+    );
+  }
+  const [before, after] = descriptor.phrase.split(`{${descriptor.param}}`);
+  return (
+    <p class="sentence">
+      {lead}
+      {before}
+      <ParamControl descriptor={descriptor} value={param} onChange={onParam} />
+      {after}.
+    </p>
+  );
+}
+
+function ResultCard({
+  c,
+  playUri,
+  enrichment,
+  canPlayHere,
+  premiumRequired,
+  onPlayHere,
+}: {
+  c: Candidate;
+  playUri?: string;
+  enrichment: Enrichment | null;
+  canPlayHere: boolean;
+  premiumRequired: boolean;
+  onPlayHere: (uri: string) => void;
+}) {
   const url = spotifyUrl(playUri);
   return (
     <article class="card">
+      {enrichment?.imageUrl && <img class="art" src={enrichment.imageUrl} alt="" />}
       <div class="kind">{c.kind}</div>
       <h2>{c.label}</h2>
       {c.kind !== 'artist' && <p class="by">{c.artist}</p>}
+      {enrichment && enrichment.genres.length > 0 && (
+        <p class="genres">{enrichment.genres.slice(0, 3).join(' · ')}</p>
+      )}
       <p class="stats">
         {c.count.toLocaleString()} plays · {hours(c.totalMs)} · last heard {relTime(c.last)}
       </p>
-      {url && (
-        <a class="play" href={url} target="_blank" rel="noreferrer">
-          ▶ Open in Spotify
-        </a>
+      <div class="card-actions">
+        {canPlayHere && playUri && (
+          <button class="play-here" onClick={() => onPlayHere(playUri)}>
+            ▶ Play here
+          </button>
+        )}
+        {url && (
+          <a class="play" href={url} target="_blank" rel="noreferrer">
+            ▶ Open in Spotify
+          </a>
+        )}
+      </div>
+      {premiumRequired && (
+        <p class="premium-note">In-browser playback needs Spotify Premium.</p>
       )}
     </article>
+  );
+}
+
+/** Connect / disconnect affordance for in-browser playback (Web Playback SDK). */
+function SpotifyConnect({ s }: { s: SpotifyHook }) {
+  if (!s.configured) {
+    return (
+      <p class="muted small">
+        Add a Spotify Client ID in <code>.env</code> to play full tracks in the browser.
+      </p>
+    );
+  }
+  if (s.status === 'connected') {
+    return (
+      <p class="spotify-status">
+        <span class="connected">● Spotify connected</span>
+        <button class="link" onClick={s.logout}>
+          disconnect
+        </button>
+      </p>
+    );
+  }
+  return (
+    <button class="connect" onClick={s.login}>
+      🎧 Connect Spotify to play here
+    </button>
+  );
+}
+
+/**
+ * Fixed bottom transport for the in-browser (Web Playback SDK) player: artwork,
+ * track/artist, a play/pause toggle, and a seek scrubber with elapsed/total time.
+ */
+function PlayerBar({
+  state,
+  position,
+  onToggle,
+  onSeek,
+}: {
+  state: Spotify.PlaybackState;
+  position: number;
+  onToggle: () => void;
+  onSeek: (positionMs: number) => void;
+}) {
+  const track = state.track_window.current_track;
+  const art = track.album.images.at(-1)?.url;
+  const duration = state.duration || track.duration_ms || 0;
+  const pos = Math.min(position, duration);
+  return (
+    <div class="playerbar">
+      {art && <img class="pb-art" src={art} alt="" />}
+      <div class="pb-main">
+        <div class="pb-meta">
+          <div class="pb-title">{track.name}</div>
+          <div class="pb-artist">{track.artists.map((a) => a.name).join(', ')}</div>
+        </div>
+        <div class="pb-scrub">
+          <span class="pb-time">{mmss(pos)}</span>
+          <input
+            class="pb-seek"
+            type="range"
+            min={0}
+            max={duration || 1}
+            value={pos}
+            aria-label="Seek"
+            onInput={(e) => onSeek(Number((e.currentTarget as HTMLInputElement).value))}
+          />
+          <span class="pb-time">{mmss(duration)}</span>
+        </div>
+      </div>
+      <button class="pb-toggle" onClick={onToggle} aria-label={state.paused ? 'Play' : 'Pause'}>
+        {state.paused ? '▶' : '⏸'}
+      </button>
+    </div>
   );
 }
 
@@ -289,6 +488,10 @@ function defaultParam(d: QueryDescriptor): string | number | undefined {
     default:
       return undefined;
   }
+}
+
+function entityLabel(entity: Entity): string {
+  return ENTITIES.find((o) => o.value === entity)?.label ?? entity;
 }
 
 /** "I play a lot" → drop the leading "I " for tighter pills where it reads better. */
