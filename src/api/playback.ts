@@ -15,6 +15,11 @@ import { PLAYBACK_SDK_SRC } from './config.js';
 export interface PlayerController {
   /** The Spotify Connect device id for this tab (available once `ready`). */
   readonly deviceId: string;
+  /**
+   * Unblock audio output for the current user gesture (mobile autoplay policy).
+   * Call this from within the tap that starts playback; a no-op on desktop.
+   */
+  activateElement(): Promise<void>;
   togglePlay(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -95,6 +100,7 @@ export async function initPlayer(
       handlers.onReady?.(device_id);
       resolve({
         deviceId: device_id,
+        activateElement: () => player.activateElement(),
         togglePlay: () => player.togglePlay(),
         pause: () => player.pause(),
         resume: () => player.resume(),

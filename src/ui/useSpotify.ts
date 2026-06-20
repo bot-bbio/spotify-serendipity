@@ -49,6 +49,10 @@ export function useSpotify(): SpotifyHook {
 
   const controllerRef = useRef<PlayerController | null>(null);
   const initRef = useRef<Promise<PlayerController> | null>(null);
+  // True once the user has actually tapped "Play here". The player is warmed up
+  // eagerly on connect, so we suppress its (possibly fatal, e.g. non-Premium)
+  // errors until then — otherwise a banner would appear before any play attempt.
+  const attemptedPlayRef = useRef(false);
   // Anchor for advancing `position` locally between the (sparse) SDK state events.
   const anchorRef = useRef({ pos: 0, at: 0, paused: true, dur: 0 });
 
@@ -86,8 +90,10 @@ export function useSpotify(): SpotifyHook {
       initRef.current = initPlayer({
         onStateChange: applyState,
         onError: (type, message) => {
-          setError(message);
           if (type === 'account_error') setPremiumRequired(true);
+          // Stay quiet during warm-up; only show a banner once the user has tried
+          // to play, so warming on connect can't surface a premature error.
+          if (attemptedPlayRef.current) setError(message);
         },
       });
     }
@@ -96,11 +102,27 @@ export function useSpotify(): SpotifyHook {
     return controller;
   }, [applyState]);
 
+  // Warm the SDK player as soon as the session is connected so the first
+  // "Play here" tap is instant (the device is already registered and `ready`)
+  // instead of paying for SDK load + connect at tap time.
+  useEffect(() => {
+    if (status !== 'connected' || SPOTIFY_CLIENT_ID === '') return;
+    // Errors here are intentionally swallowed; they re-surface via onError once
+    // the user taps play (see attemptedPlayRef).
+    void ensurePlayer().catch(() => {});
+  }, [status, ensurePlayer]);
+
   const play = useCallback(
     async (uri: string): Promise<void> => {
+      attemptedPlayRef.current = true;
       setError(null);
       try {
         const controller = await ensurePlayer();
+        // Mobile browsers gate audio behind a user gesture; activate the SDK's
+        // audio element within this tap so the first play starts promptly rather
+        // than being blocked/delayed. Best-effort: a no-op/rejection on desktop
+        // must not abort playback.
+        await controller.activateElement().catch(() => {});
         try {
           await playTracks(controller.deviceId, [uri]);
         } catch (e) {
@@ -115,8 +137,10 @@ export function useSpotify(): SpotifyHook {
         }
         // The `player_state_changed` event normally drives the player bar, but the
         // first event can be missed while the device spins up — seed from
-        // getCurrentState so the controls reliably appear regardless.
-        for (let i = 0; i < 5; i++) {
+        // getCurrentState so the controls appear without waiting on that event.
+        // (getCurrentState returns null until the device is the active one, so we
+        // poll briefly; the loop exits the moment a state is available.)
+        for (let i = 0; i < 8; i++) {
           const s = await controller.getCurrentState();
           if (s) {
             applyState(s);

@@ -75,6 +75,12 @@ declare namespace Spotify {
     addListener(event: ErrorType, cb: (error: Error) => void): boolean;
     removeListener(event: string): boolean;
     getCurrentState(): Promise<PlaybackState | null>;
+    /**
+     * Unblock audio output for the current user gesture. Mobile browsers (iOS
+     * Safari/Chrome) require this to be called from within a tap handler before
+     * the SDK is allowed to produce sound; a no-op on desktop.
+     */
+    activateElement(): Promise<void>;
     togglePlay(): Promise<void>;
     pause(): Promise<void>;
     resume(): Promise<void>;
