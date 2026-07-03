@@ -145,6 +145,109 @@ describe('listening-behavior queries', () => {
   });
 });
 
+describe('temporal-pattern queries', () => {
+  // Mid-month, midday-UTC timestamps keep the local calendar month stable for
+  // any runner timezone within UTC±11 (the index buckets in local time).
+  it('bySeason finds summer-concentrated artists, including a wrap past New Year', () => {
+    const e = buildEngine([
+      ...gen('SummerGuy', 6, { startMs: Date.UTC(2022, 6, 10, 12), stepMs: 86_400_000 }),
+      ...gen('WinterGuy', 6, { startMs: Date.UTC(2022, 11, 15, 12), stepMs: 12 * 86_400_000 }),
+    ]);
+    const summer = labels(e.bySeason({ entity: 'artist', fromMonth: 5, toMonth: 7 }));
+    expect(summer).toContain('SummerGuy');
+    expect(summer).not.toContain('WinterGuy');
+    // Winter wraps Dec -> Feb (11 -> 1).
+    const winter = labels(e.bySeason({ entity: 'artist', fromMonth: 11, toMonth: 1 }));
+    expect(winter).toContain('WinterGuy');
+    expect(winter).not.toContain('SummerGuy');
+  });
+
+  it('discovered keeps only recent first-plays', () => {
+    const now = Date.UTC(2025, 0, 1);
+    const e = buildEngine(
+      [
+        ...gen('NewFind', 3, { startMs: Date.UTC(2024, 11, 15), stepMs: 3_600_000 }),
+        ...gen('OldNews', 3, { startMs: Date.UTC(2020, 0, 1) }),
+      ],
+      now,
+    );
+    const out = labels(e.discovered({ entity: 'artist', withinDays: 30 }));
+    expect(out).toEqual(['NewFind']);
+  });
+
+  it('thisDayInHistory excludes plays from the current year (regression)', () => {
+    const now = Date.UTC(2025, 5, 15, 12);
+    const e = buildEngine(
+      [
+        ...gen('PastYears', 1, { startMs: Date.UTC(2021, 5, 15, 12) }),
+        ...gen('Today', 1, { startMs: Date.UTC(2025, 5, 15, 12) }),
+      ],
+      now,
+    );
+    expect(labels(e.thisDayInHistory({ entity: 'artist' }))).toEqual(['PastYears']);
+  });
+});
+
+describe('library-shape queries', () => {
+  it('oneHitWonder finds artists dominated by a single track', () => {
+    const e = buildEngine([
+      ...gen('OneHit', 9, { startMs: Date.UTC(2022, 0, 1), track: 'The Hit' }),
+      ...gen('OneHit', 1, { startMs: Date.UTC(2022, 6, 1), track: 'B Side' }),
+      ...gen('Varied', 5, { startMs: Date.UTC(2022, 0, 1), track: 'Cut One' }),
+      ...gen('Varied', 5, { startMs: Date.UTC(2022, 3, 1), track: 'Cut Two' }),
+    ]);
+    const out = labels(e.oneHitWonder());
+    expect(out).toContain('OneHit');
+    expect(out).not.toContain('Varied');
+  });
+
+  it('byPlatform accepts a family of needles (phone = iOS or Android)', () => {
+    const e = buildEngine([
+      ...gen('IPhone', 2, { startMs: Date.UTC(2022, 0, 1), platform: 'iOS 17.2' }),
+      ...gen('Droid', 2, { startMs: Date.UTC(2022, 2, 1), platform: 'Android OS 14' }),
+      ...gen('Desk', 2, { startMs: Date.UTC(2022, 4, 1), platform: 'OS X' }),
+    ]);
+    const out = labels(e.byPlatform({ entity: 'artist', platform: ['ios', 'android'] }));
+    expect(out).toContain('IPhone');
+    expect(out).toContain('Droid');
+    expect(out).not.toContain('Desk');
+  });
+
+  it('whileTraveling infers home as the modal country when omitted', () => {
+    const e = buildEngine([
+      ...gen('Homebody', 3, { startMs: Date.UTC(2022, 0, 1), country: 'CA' }),
+      ...gen('Wander', 2, { startMs: Date.UTC(2022, 6, 1), country: 'JP' }),
+    ]);
+    expect(labels(e.whileTraveling({ entity: 'artist' }))).toEqual(['Wander']);
+  });
+
+  it('whileTraveling is empty when the export has no country data', () => {
+    const e = buildEngine(gen('NoCountry', 3, { startMs: Date.UTC(2022, 0, 1) }));
+    expect(e.whileTraveling({ entity: 'artist' })).toEqual([]);
+  });
+});
+
+describe('dataset introspection', () => {
+  const e = buildEngine([
+    ...gen('First', 1, { startMs: Date.UTC(2021, 2, 10, 12) }),
+    ...gen('Last', 1, { startMs: Date.UTC(2023, 8, 20, 12) }),
+  ]);
+
+  it('yearsAvailable spans first to last event year inclusive', () => {
+    expect(e.yearsAvailable()).toEqual([2021, 2022, 2023]);
+  });
+
+  it('dateRange reports the first/last event days (UTC)', () => {
+    expect(e.dateRange()).toEqual({ min: '2021-03-10', max: '2023-09-20' });
+  });
+
+  it('both are empty/null on an empty dataset', () => {
+    const empty = buildEngine([]);
+    expect(empty.yearsAvailable()).toEqual([]);
+    expect(empty.dateRange()).toBeNull();
+  });
+});
+
 describe('representativeUri (playback target)', () => {
   const e = buildEngine([
     ...gen('Rep', 3, { startMs: Date.UTC(2022, 0, 1), track: 'Hit' }),

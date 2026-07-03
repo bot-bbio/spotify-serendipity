@@ -46,6 +46,12 @@ export default defineConfig({
       // External registration script (not inline) so `script-src 'self'` allows it.
       injectRegister: 'script',
       includeAssets: ['icon.svg'],
+      workbox: {
+        // Default globs plus the latin font subsets so the app is fully styled
+        // offline. Other script subsets (cyrillic, greek, …) stay online-only —
+        // their @font-face unicode-ranges lazy-load them — keeping the precache small.
+        globPatterns: ['**/*.{js,css,html,svg}', '**/*-latin-wght-normal-*.woff2'],
+      },
       manifest: {
         name: 'Serendipity',
         short_name: 'Serendipity',

@@ -1,47 +1,86 @@
 # Serendipity — Open TODOs
 
-_Last updated: 2026-07-03_
+_Last updated: 2026-07-03 (portfolio-polish pass: GUI overhaul, criteria expansion, bug fixes)_
 
-Tracking the bug-fix pass on playback, enrichment, and the mad-lib UI. The key
-finding: the three reported symptoms below **do not reproduce in the test harness** —
-the app logic resolves correctly in a single click and pulls artwork on the connected
-path. They are therefore **live-environment** issues (real Spotify Web API/SDK +
-browser), and need DevTools data from a real connected session to fix correctly
-(this repo's rule: reproduce before fixing).
+## Resolved this pass (root causes found)
 
-## Open bugs (need live DevTools capture)
+### 1. "Two clicks to execute" — CLOSED (two real causes, both fixed)
+- **Root cause A (main):** with a small candidate pool, the weighted draw regularly
+  returned the *pick already on screen* — visually a no-op click. Fix: `surprise()`
+  excludes the current result whenever the pool has an alternative
+  (`src/app.tsx`), locked by `src/app.norepeat.test.ts` (12 consecutive clicks,
+  no repeats) and re-verified live (headless Chrome, production build).
+- **Root cause B (contributing):** the PRNG was re-seeded `rng(Date.now())` *per
+  click*, so two clicks in the same millisecond replayed the identical pick. Now
+  one session-lifetime PRNG.
+- Also: the result card now remounts per pick (entrance animation replays as
+  feedback) and scrolls itself into view — on small screens a new result could
+  land below the fold, reading as "nothing happened".
 
-_Re-confirmed 2026-07-03: the in-repo guards the hypotheses lean on are all present
-and correct — idempotent single mount (`src/main.tsx:12`), cached SDK controller
-(`src/ui/useSpotify.ts:84` `controllerRef`), shared refresh promise. No new
-in-harness reproduction found; these still need a real connected session to fix._
+### 2. Fonts silently broken in production — FIXED
+- `style.css` pulled Inter/Outfit from `fonts.googleapis.com`, but the production
+  CSP is `default-src 'self'` with no font/style allowances — prod silently fell
+  back to system fonts (dev looked different from prod). Fonts are now bundled
+  (`@fontsource-variable/*`, imported in `src/main.tsx`); latin subsets are
+  precached by the service worker so the PWA is styled offline. Verified live:
+  `document.fonts.check('16px "Inter Variable"')` → true on the built app, zero
+  CSP console errors.
 
-### 1. "Two clicks to execute" — Surprise needs a second click
-- **Reported:** Even repeating the same selection, the first Surprise click appears to do nothing; a second click shows a result.
-- **Verified:** `src/app.surprise.test.ts` drives entity switches (artist/album/track) + a single Surprise click and asserts a result card of the *correct kind* every time. Passes — so the component state logic is not one-render-behind.
-- **Leading hypothesis:** Duplicate app root (the Web Playback SDK double-mount the CSS safety-net at `style.css` `#app > main.app ~ main.app { display:none }` only *hides*), or a touch/`:hover` first-tap being swallowed on mobile.
-- **Capture:** Console — click Surprise once: does a card appear? any red errors? Then run `document.querySelectorAll('main.app').length` → expect `1`, a `2` confirms the duplicate-mount theory.
+### 3. Clickjacking "fix" was cosmetic — FIXED (audit corrected)
+- `frame-ancestors 'none'` was delivered via the CSP `<meta>` tag, which the spec
+  **ignores** (Chrome logged an error on every load). Real control now:
+  `src/framebust.ts` — the app refuses to mount inside a frame. Live-verified
+  with a hostile-iframe probe. `SECURITY_AUDIT.md` VULN-011 updated.
 
-### 2. Artwork broken when connected
-- **Reported:** Song/album/artist image does not appear on the suggestion even after connecting Spotify.
-- **Verified:** `src/app.enrich.test.ts` runs the real `useEnrichment` hook (network stubbed) with valid base62 URIs; a single click renders the card **and** `img.art` for all three kinds. Passes.
-- **Leading hypothesis:** the live enrichment fetch is failing — `GET /v1/tracks/{id}` or `/v1/artists/{id}` returning 401/403/404 (token/scope, or a catalog id that no longer resolves). Not CSP (dev injects no CSP; prod policy already allows `i.scdn.co`/`*.scdn.co`).
-- **Capture:** Network tab filtered to `spotify.com` — after a suggestion appears, find `GET …/v1/tracks/…` and `…/v1/artists/…` and record the status codes.
+### 4. Smaller fixes
+- Stale "No match" note persisted across entity/criterion switches — cleared now.
+- Free-text year input allowed out-of-range years (and `Number('') → 0` while
+  typing); replaced with a dropdown of the dataset's actual years, newest first.
+- Date params defaulted to *today*, which a historical export never contains
+  (instant no-match); now default to the export's last day, bounded min/max.
+- `thisDayInHistory` included the *current* year's plays in "past years".
+- Import worker had no `onerror` → a crashed worker left "Importing…" forever.
+- Re-choosing the same file after a failed import didn't re-fire `onChange`
+  (input value never reset).
+- `relTime` grammar: "1 days ago" / "1 months ago" → singular.
+- Onboarding copy: missing space before the `Streaming_History_*.json` code chip
+  (JSX newline collapsing).
 
-### 3. Every play lags
-- **Reported:** Noticeable delay on every "Play here", not just the first.
-- **Verified:** controller is cached in `useSpotify` (`controllerRef`), so re-init is not happening per play.
-- **Leading hypothesis:** part inherent (stream-start buffering + `PUT /me/player/play` round-trip), part the post-play `getCurrentState` poll loop (up to 5×250ms) in `src/ui/useSpotify.ts`. First-play warm-up can be removed by pre-warming the SDK on connect (the connect click is a valid user gesture for autoplay).
-- **Capture:** Network — after "Play here", find `PUT …/v1/me/player/play`: status + rough time-to-audio (1s? 5s? only after a 2nd click?). Need magnitude to tell bug from inherent latency.
+### 5. Player bar frozen on the previous track — CLOSED (root cause found)
+- **Reported:** "Play here" changed the audio but not the visuals; the bar only
+  caught up after unrelated UI interaction.
+- **Root cause:** the post-play seed loop in `useSpotify.play()` broke on the
+  *first truthy* `getCurrentState()` — on every play after the first, that is
+  the still-playing *previous* track. And the SDK's `player_state_changed`
+  event is unreliable for API-initiated track changes, so nothing corrected it.
+- **Fix (two layers):** `play(uri)` now polls until the reported state is for
+  the requested uri (falling back to the freshest state), and a 1 s reconcile
+  loop compares polled SDK state against what's shown — track change, external
+  pause/resume, or a >2 s position jump re-syncs the bar. Locked by
+  `src/ui/useSpotify.test.ts` (the poll test fails against the old logic —
+  verified by temporarily reverting it).
 
-## Regression tests added (committed)
+### 6. Volume controls — ADDED
+- The player bar now has a mute toggle + volume slider (slider hides ≤540 px,
+  mute stays). `PlayerController` gained `setVolume`/`getVolume`; the hook syncs
+  its initial value from the device and restores the last non-zero volume on
+  unmute.
 
-- `src/app.surprise.test.ts` — single-click resolution after entity/criterion switches, asserts correct kind.
-- `src/app.enrich.test.ts` — connected path renders card + artwork on the first click (real `useEnrichment`, stubbed network).
-- Also tightened the outcome assertion (the always-present footer `.muted` span made the prior `.card ?? .muted` check trivially true).
-- `src/style.test.ts` — asserts every `var(--foo)` in `style.css` resolves to a declared custom property (guards the `--accent-hover` class of silent-fallback bug). Reads the file via `node:fs` because vitest stubs `.css` imports to empty; `node:fs` typed by the local sliver in `src/test/node-shims.d.ts`.
+## Still open (need a live connected session)
 
-## Done / not a bug
+### Artwork enrichment when connected
+- `src/app.enrich.test.ts` proves the connected path renders `img.art` with the
+  network stubbed, so the app logic is sound; live failures would be
+  token/scope/404 issues. **Capture:** Network tab → status of
+  `GET /v1/tracks/{id}` and `/v1/artists/{id}` after a suggestion.
 
-- **`--accent-hover` was undefined — FIXED (2026-07-03).** Referenced 4× in `src/style.css` (now lines 312/352/364/459) but never declared in `:root`, so the entity dropdown text, selected criterion chip, and card "kind" label fell back to inherited white instead of green. Fix: added `--accent-hover: var(--accent-2);` to `:root`. Guarded by `src/style.test.ts` (verified: both assertions fail with the declaration removed).
-- Concurrent refresh race — already fixed (`src/api/auth.ts` shares one `refreshInFlight` promise).
+### Play-here latency
+- Partly inherent (stream start + `PUT /me/player/play` round trip). Possible
+  improvement: pre-warm the SDK on *connect* (a valid user gesture) instead of
+  first play. **Capture:** time-to-audio after the `play` PUT returns.
+
+## Feature ideas (not started)
+- Shareable "pick of the day" card (canvas render → share sheet).
+- Exclusion memory ("never show me this again").
+- Multi-criteria combination ("an artist I played a lot in 2021 *and* haven't
+  heard in a year").

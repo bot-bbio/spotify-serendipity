@@ -9,14 +9,17 @@
  *   img-src          self + Spotify CDN artwork (scdn.co), data: for inlined icons
  *   frame-src        the SDK's hidden iframe (sdk.scdn.co)
  *   media-src        self + Spotify media + blob: for the EME-decrypted stream
- *   frame-ancestors  'none' — VULN-011: this directive has no fallback to
- *                    default-src, so it must be set explicitly or the app can be
- *                    framed (clickjacking on "remove data" / "disconnect").
+ *
+ * Clickjacking (VULN-011): `frame-ancestors` is the right control, but per the
+ * CSP spec it is *ignored* when delivered via <meta> (browsers log a console
+ * error and drop it). It is kept in {@link CSP_HEADER_DIRECTIVES} for any future
+ * header-capable deployment, excluded from the <meta> policy, and the actual
+ * in-page defense is the frame guard in `src/framebust.ts` (run before mount).
  *
  * Kept in its own dependency-free module (rather than inline in `vite.config.ts`)
  * so it can be unit-tested without pulling in the Vite/plugin toolchain.
  */
-export const CSP_DIRECTIVES = [
+const META_DIRECTIVES = [
   "default-src 'self'",
   "connect-src 'self' https://api.spotify.com https://accounts.spotify.com https://*.spotify.com wss://*.spotify.com",
   "script-src 'self' https://sdk.scdn.co",
@@ -25,7 +28,12 @@ export const CSP_DIRECTIVES = [
   "media-src 'self' https://*.spotify.com blob:",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-ancestors 'none'",
 ] as const;
+
+/** The full policy, for a deployment that can send real HTTP headers. */
+export const CSP_HEADER_DIRECTIVES = [...META_DIRECTIVES, "frame-ancestors 'none'"] as const;
+
+/** Directives legal in a <meta> tag (spec: no frame-ancestors / report-uri / sandbox). */
+export const CSP_DIRECTIVES = META_DIRECTIVES;
 
 export const CSP = CSP_DIRECTIVES.join('; ');

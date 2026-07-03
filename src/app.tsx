@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { build } from './core/pipeline.js';
 import { rng, weightedPick } from './core/random.js';
 import { descriptorsFor, type QueryDescriptor, REGISTRY_BY_ID } from './core/registry.js';
@@ -20,11 +20,22 @@ interface DataMeta {
   demo: boolean;
 }
 
+/** Dataset-derived bounds for the inline param controls. */
+interface ParamEnv {
+  years: number[];
+  dateMin?: string;
+  dateMax?: string;
+}
+
 const ENTITIES: { value: Entity; label: string }[] = [
   { value: 'artist', label: 'an artist' },
   { value: 'album', label: 'an album' },
   { value: 'track', label: 'a song' },
 ];
+
+// One PRNG for the whole session: re-seeding per click (the old `rng(Date.now())`)
+// made two clicks in the same millisecond replay the identical pick.
+const surpriseRand = rng(Date.now());
 
 export function App() {
   const [status, setStatus] = useState<Status>('loading');
@@ -39,6 +50,7 @@ export function App() {
 
   const [result, setResult] = useState<Candidate | null>(null);
   const [resultUri, setResultUri] = useState<string | undefined>(undefined);
+  const [resultNonce, setResultNonce] = useState(0);
   const [noMatch, setNoMatch] = useState(false);
 
   const spotify = useSpotify();
@@ -49,6 +61,12 @@ export function App() {
   const active = REGISTRY_BY_ID.get(criterionId);
   const activeGroup = active?.group;
   const groupItems = groups.find(([g]) => g === activeGroup)?.[1] ?? descriptors;
+
+  const paramEnv = useMemo<ParamEnv>(() => {
+    if (!engine) return { years: [] };
+    const range = engine.dateRange();
+    return { years: engine.yearsAvailable(), dateMin: range?.min, dateMax: range?.max };
+  }, [engine]);
 
   // Restore a previously imported dataset on first load.
   useEffect(() => {
@@ -62,21 +80,27 @@ export function App() {
       .catch(() => setStatus('empty'));
   }, []);
 
+  function clearOutcome() {
+    setResult(null);
+    setResultUri(undefined);
+    setNoMatch(false);
+  }
+
   function chooseEntity(next: Entity) {
     setEntity(next);
     const ds = descriptorsFor(next);
     if (!ds.some((d) => d.id === criterionId)) {
       setCriterionId(ds[0].id);
-      setParam(defaultParam(ds[0]));
+      setParam(defaultParam(ds[0], paramEnv));
     }
-    setResult(null);
+    clearOutcome();
   }
 
   function chooseCriterion(id: string) {
     setCriterionId(id);
     const d = REGISTRY_BY_ID.get(id);
-    if (d) setParam(defaultParam(d));
-    setResult(null);
+    if (d) setParam(defaultParam(d, paramEnv));
+    clearOutcome();
   }
 
   /** Selecting a group jumps to its first criterion (the group is just a filter). */
@@ -90,10 +114,17 @@ export function App() {
     const d = REGISTRY_BY_ID.get(criterionId);
     if (!d) return;
     const candidates = d.run(engine, { entity, param });
-    const pick = weightedPick(candidates, (c) => Math.max(1, c.count), rng(Date.now()));
+    // Re-drawing the pick already on screen reads as "the button did nothing",
+    // so exclude it whenever the pool offers an alternative.
+    const pool =
+      result && candidates.length > 1
+        ? candidates.filter((c) => !(c.kind === result.kind && c.id === result.id))
+        : candidates;
+    const pick = weightedPick(pool, (c) => Math.max(1, c.count), surpriseRand);
     setResult(pick ?? null);
     setResultUri(pick ? engine.representativeUri(pick) : undefined);
     setNoMatch(!pick);
+    setResultNonce((n) => n + 1);
   }
 
   function importFiles(files: FileList | null) {
@@ -120,6 +151,13 @@ export function App() {
         worker.terminate();
       }
     };
+    // Without this, a worker that fails to even start (e.g. a bundling or
+    // load-time error) would leave the UI stuck at "Importing…" forever.
+    worker.onerror = () => {
+      setError('The import crashed unexpectedly — please try again.');
+      setStatus('empty');
+      worker.terminate();
+    };
     worker.postMessage({ files: Array.from(files) });
   }
 
@@ -134,14 +172,19 @@ export function App() {
     await clearDataset();
     setEngine(null);
     setMeta(null);
-    setResult(null);
+    clearOutcome();
     setStatus('empty');
   }
 
   return (
     <main class="app">
       <header>
-        <h1>🎲 Serendipity</h1>
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <IconDice />
+          </span>
+          <h1>Serendipity</h1>
+        </div>
         <p class="tagline">Rediscover your own listening history.</p>
       </header>
 
@@ -150,7 +193,7 @@ export function App() {
       {(status === 'empty' || status === 'importing') && (
         <section class="onboard">
           <p>
-            Import your Spotify <strong>Extended Streaming History</strong> (the
+            Import your Spotify <strong>Extended Streaming History</strong> (the{' '}
             <code>Streaming_History_*.json</code> files from your data export) — everything
             is processed locally on your device.
           </p>
@@ -161,13 +204,24 @@ export function App() {
               accept="application/json,.json"
               multiple
               disabled={status === 'importing'}
-              onChange={(e) => importFiles((e.currentTarget as HTMLInputElement).files)}
+              onChange={(e) => {
+                const input = e.currentTarget as HTMLInputElement;
+                importFiles(input.files);
+                // Reset so choosing the same file again (e.g. after a failed
+                // import) still fires a change event.
+                input.value = '';
+              }}
             />
           </label>
           <button class="ghost" onClick={loadDemo} disabled={status === 'importing'}>
             …or explore with demo data
           </button>
-          {status === 'importing' && <p class="muted">Importing… {progress}%</p>}
+          {status === 'importing' && (
+            <div class="progress" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+              <div class="progress-fill" style={{ width: `${progress}%` }} />
+              <span class="progress-label">Importing… {progress}%</span>
+            </div>
+          )}
           {error && <p class="error">Import failed: {error}</p>}
         </section>
       )}
@@ -210,7 +264,7 @@ export function App() {
                 <button
                   type="button"
                   class="chip"
-                  aria-selected={d.id === criterionId ? 'true' : 'false'}
+                  aria-pressed={d.id === criterionId ? 'true' : 'false'}
                   onClick={() => chooseCriterion(d.id)}
                 >
                   {phraseLabel(d)}
@@ -218,11 +272,17 @@ export function App() {
               ))}
             </div>
 
-            <MadlibSentence entity={entity} descriptor={active} param={param} onParam={setParam} />
+            <MadlibSentence
+              entity={entity}
+              descriptor={active}
+              param={param}
+              onParam={setParam}
+              env={paramEnv}
+            />
           </section>
 
           <button class="surprise" onClick={surprise}>
-            🎲 Surprise me
+            <IconDice /> Surprise me
           </button>
 
           <SpotifyConnect s={spotify} />
@@ -230,6 +290,7 @@ export function App() {
 
           {result && (
             <ResultCard
+              key={resultNonce}
               c={result}
               playUri={resultUri}
               enrichment={enrichment}
@@ -238,7 +299,9 @@ export function App() {
               onPlayHere={spotify.play}
             />
           )}
-          {noMatch && !result && <p class="muted">No match for that one — try another phrase.</p>}
+          {noMatch && !result && (
+            <p class="muted no-match">No match for that one — try another phrase.</p>
+          )}
 
           {spotify.current && (
             <>
@@ -246,8 +309,11 @@ export function App() {
               <PlayerBar
                 state={spotify.current}
                 position={spotify.position}
+                volume={spotify.volume}
                 onToggle={spotify.toggle}
                 onSeek={spotify.seek}
+                onVolume={spotify.setVolume}
+                onToggleMute={spotify.toggleMute}
               />
             </>
           )}
@@ -274,10 +340,12 @@ function ParamControl({
   descriptor,
   value,
   onChange,
+  env,
 }: {
   descriptor: QueryDescriptor | undefined;
   value: string | number | undefined;
   onChange: (v: string | number) => void;
+  env: ParamEnv;
 }) {
   if (!descriptor || descriptor.param === 'none') return null;
   if (descriptor.param === 'date') {
@@ -285,22 +353,43 @@ function ParamControl({
       <Pill>
         <input
           type="date"
-          value={String(value ?? '')}
+          value={String(value ?? env.dateMax ?? '')}
+          min={env.dateMin}
+          max={env.dateMax}
           onInput={(e) => onChange((e.currentTarget as HTMLInputElement).value)}
         />
       </Pill>
     );
   }
   if (descriptor.param === 'year') {
+    // Only the years the dataset actually spans, newest first — a free-text
+    // number field invited out-of-range years that always dead-ended in no-match.
+    const years =
+      env.years.length > 0 ? [...env.years].reverse() : [new Date().getUTCFullYear()];
     return (
       <Pill>
-        <input
-          type="number"
-          min={2008}
-          max={new Date().getUTCFullYear()}
-          value={Number(value ?? new Date().getUTCFullYear())}
-          onInput={(e) => onChange(Number((e.currentTarget as HTMLInputElement).value))}
-        />
+        <select
+          value={String(value ?? years[0])}
+          onChange={(e) => onChange(Number((e.currentTarget as HTMLSelectElement).value))}
+        >
+          {years.map((y) => (
+            <option value={String(y)}>{y}</option>
+          ))}
+        </select>
+      </Pill>
+    );
+  }
+  if (descriptor.param === 'choice') {
+    return (
+      <Pill>
+        <select
+          value={String(value ?? descriptor.choices?.[0]?.value ?? '')}
+          onChange={(e) => onChange((e.currentTarget as HTMLSelectElement).value)}
+        >
+          {descriptor.choices?.map((c) => (
+            <option value={c.value}>{c.label}</option>
+          ))}
+        </select>
       </Pill>
     );
   }
@@ -309,6 +398,7 @@ function ParamControl({
     <Pill>
       <select value={Number(value ?? 365)} onChange={(e) => onChange(Number((e.currentTarget as HTMLSelectElement).value))}>
         <option value={30}>a month</option>
+        <option value={91}>three months</option>
         <option value={182}>six months</option>
         <option value={365}>a year</option>
         <option value={730}>two years</option>
@@ -319,23 +409,27 @@ function ParamControl({
 
 /**
  * The assembled query as a live mad-lib sentence. For criteria with an inline
- * blank ({date}/{year}/{duration}) the param control is rendered in place, so the
- * sentence both reads naturally and is where the blank is edited.
+ * blank ({date}/{year}/{duration}/choice tokens like {weekday}) the param control
+ * is rendered in place, so the sentence both reads naturally and is where the
+ * blank is edited.
  */
 function MadlibSentence({
   entity,
   descriptor,
   param,
   onParam,
+  env,
 }: {
   entity: Entity;
   descriptor: QueryDescriptor | undefined;
   param: string | number | undefined;
   onParam: (v: string | number) => void;
+  env: ParamEnv;
 }) {
   if (!descriptor) return null;
   const lead = `Show me ${entityLabel(entity)} `;
-  if (descriptor.param === 'none') {
+  const blank = descriptor.phrase.match(/\{[a-z-]+\}/i)?.[0];
+  if (descriptor.param === 'none' || !blank) {
     return (
       <p class="sentence">
         {lead}
@@ -343,12 +437,12 @@ function MadlibSentence({
       </p>
     );
   }
-  const [before, after] = descriptor.phrase.split(`{${descriptor.param}}`);
+  const [before, after] = descriptor.phrase.split(blank);
   return (
     <p class="sentence">
       {lead}
       {before}
-      <ParamControl descriptor={descriptor} value={param} onChange={onParam} />
+      <ParamControl descriptor={descriptor} value={param} onChange={onParam} env={env} />
       {after}.
     </p>
   );
@@ -370,27 +464,51 @@ function ResultCard({
   onPlayHere: (uri: string) => void;
 }) {
   const url = spotifyUrl(playUri);
+  const ref = useRef<HTMLElement>(null);
+  // Keyed by the surprise nonce, the card remounts per pick; make sure the fresh
+  // result is actually visible (on small screens it can land below the fold).
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      block: 'nearest',
+    });
+  }, []);
   return (
-    <article class="card">
-      {enrichment?.imageUrl && <img class="art" src={enrichment.imageUrl} alt="" />}
-      <div class="kind">{c.kind}</div>
-      <h2>{c.label}</h2>
-      {c.kind !== 'artist' && <p class="by">{c.artist}</p>}
-      {enrichment && enrichment.genres.length > 0 && (
-        <p class="genres">{enrichment.genres.slice(0, 3).join(' · ')}</p>
-      )}
-      <p class="stats">
-        {c.count.toLocaleString()} plays · {hours(c.totalMs)} · last heard {relTime(c.last)}
-      </p>
+    <article class="card" ref={ref}>
+      <div class="card-body">
+        {enrichment?.imageUrl && <img class="art" src={enrichment.imageUrl} alt="" />}
+        <div class="card-info">
+          <div class="kind">{c.kind}</div>
+          <h2>{c.label}</h2>
+          {c.kind !== 'artist' && <p class="by">{c.artist}</p>}
+          {enrichment && enrichment.genres.length > 0 && (
+            <p class="genres">{enrichment.genres.slice(0, 3).join(' · ')}</p>
+          )}
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <span class="stat-value">{c.count.toLocaleString()}</span>
+          <span class="stat-label">plays</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{hours(c.totalMs)}</span>
+          <span class="stat-label">listened</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{relTime(c.last)}</span>
+          <span class="stat-label">last heard</span>
+        </div>
+      </div>
       <div class="card-actions">
         {canPlayHere && playUri && (
           <button class="play-here" onClick={() => onPlayHere(playUri)}>
-            ▶ Play here
+            <IconPlay /> Play here
           </button>
         )}
         {url && (
           <a class="play" href={url} target="_blank" rel="noreferrer">
-            ▶ Open in Spotify
+            <IconExternal /> Open in Spotify
           </a>
         )}
       </div>
@@ -413,7 +531,7 @@ function SpotifyConnect({ s }: { s: SpotifyHook }) {
   if (s.status === 'connected') {
     return (
       <p class="spotify-status">
-        <span class="connected">● Spotify connected</span>
+        <span class="connected">Spotify connected</span>
         <button class="link" onClick={s.logout}>
           disconnect
         </button>
@@ -422,30 +540,38 @@ function SpotifyConnect({ s }: { s: SpotifyHook }) {
   }
   return (
     <button class="connect" onClick={s.login}>
-      🎧 Connect Spotify to play here
+      <IconHeadphones /> Connect Spotify to play here
     </button>
   );
 }
 
 /**
  * Fixed bottom transport for the in-browser (Web Playback SDK) player: artwork,
- * track/artist, a play/pause toggle, and a seek scrubber with elapsed/total time.
+ * track/artist, a play/pause toggle, a seek scrubber with elapsed/total time,
+ * and local volume (slider + mute).
  */
 function PlayerBar({
   state,
   position,
+  volume,
   onToggle,
   onSeek,
+  onVolume,
+  onToggleMute,
 }: {
   state: Spotify.PlaybackState;
   position: number;
+  volume: number;
   onToggle: () => void;
   onSeek: (positionMs: number) => void;
+  onVolume: (volume: number) => void;
+  onToggleMute: () => void;
 }) {
   const track = state.track_window.current_track;
   const art = track.album.images.at(-1)?.url;
   const duration = state.duration || track.duration_ms || 0;
   const pos = Math.min(position, duration);
+  const muted = volume === 0;
   return (
     <div class="playerbar">
       {art && <img class="pb-art" src={art} alt="" />}
@@ -457,7 +583,7 @@ function PlayerBar({
         <div class="pb-scrub">
           <span class="pb-time">{mmss(pos)}</span>
           <input
-            class="pb-seek"
+            class="pb-range pb-seek"
             type="range"
             min={0}
             max={duration || 1}
@@ -468,23 +594,128 @@ function PlayerBar({
           <span class="pb-time">{mmss(duration)}</span>
         </div>
       </div>
+      <div class="pb-vol">
+        <button class="pb-mute" onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
+          {muted ? <IconVolumeMuted /> : <IconVolume />}
+        </button>
+        <input
+          class="pb-range pb-volume"
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(volume * 100)}
+          aria-label="Volume"
+          onInput={(e) => onVolume(Number((e.currentTarget as HTMLInputElement).value) / 100)}
+        />
+      </div>
       <button class="pb-toggle" onClick={onToggle} aria-label={state.paused ? 'Play' : 'Pause'}>
-        {state.paused ? '▶' : '⏸'}
+        {state.paused ? <IconPlay /> : <IconPause />}
       </button>
     </div>
   );
 }
 
+// ---- icons ------------------------------------------------------------------
+// Inline, currentColor SVGs — no icon font, no external requests (CSP: 'self').
+
+function IconDice() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="4.5" fill="none" stroke="currentColor" stroke-width="2" />
+      <circle cx="8.6" cy="8.6" r="1.5" fill="currentColor" />
+      <circle cx="15.4" cy="8.6" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="8.6" cy="15.4" r="1.5" fill="currentColor" />
+      <circle cx="15.4" cy="15.4" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconPlay() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path d="M8 5.14v13.72c0 .8.87 1.3 1.56.88l11-6.86a1.04 1.04 0 0 0 0-1.76l-11-6.86A1.04 1.04 0 0 0 8 5.14z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconPause() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <rect x="6.5" y="5" width="4" height="14" rx="1" fill="currentColor" />
+      <rect x="13.5" y="5" width="4" height="14" rx="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconExternal() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path d="M14 4h6v6h-2V7.41l-8.29 8.3-1.42-1.42 8.3-8.29H14V4z" fill="currentColor" />
+      <path d="M5 6h6v2H7v9h9v-4h2v6H5V6z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconVolume() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path d="M4 9v6h3.6L13 19.5v-15L7.6 9H4z" fill="currentColor" />
+      <path
+        d="M16 8.6a4.5 4.5 0 0 1 0 6.8M18.2 6.2a7.6 7.6 0 0 1 0 11.6"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconVolumeMuted() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path d="M4 9v6h3.6L13 19.5v-15L7.6 9H4z" fill="currentColor" />
+      <path
+        d="m16 9.5 5 5m0-5-5 5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconHeadphones() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path
+        d="M12 3a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h1a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1H5a7 7 0 0 1 14 0h-2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1a3 3 0 0 0 3-3v-6a9 9 0 0 0-9-9z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 // ---- small helpers --------------------------------------------------------
 
-function defaultParam(d: QueryDescriptor): string | number | undefined {
+function prefersReducedMotion(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function defaultParam(d: QueryDescriptor, env: ParamEnv): string | number | undefined {
   switch (d.param) {
     case 'date':
-      return new Date().toISOString().slice(0, 10);
+      // Default to the last day covered by the export — "today" is almost never
+      // in a historical export and dead-ended in an instant no-match.
+      return env.dateMax ?? new Date().toISOString().slice(0, 10);
     case 'year':
-      return new Date().getUTCFullYear();
+      return env.years.at(-1) ?? new Date().getUTCFullYear();
     case 'duration':
       return 365;
+    case 'choice':
+      return d.choices?.[0]?.value;
     default:
       return undefined;
   }
@@ -494,9 +725,9 @@ function entityLabel(entity: Entity): string {
   return ENTITIES.find((o) => o.value === entity)?.label ?? entity;
 }
 
-/** "I play a lot" → drop the leading "I " for tighter pills where it reads better. */
+/** Pill label: the phrase with any inline blank collapsed to an ellipsis. */
 function phraseLabel(d: QueryDescriptor): string {
-  return d.phrase.replace('{date}', '…').replace('{year}', '…').replace('{duration}', '…');
+  return d.phrase.replace(/\{[a-z-]+\}/gi, '…');
 }
 
 function groupBy(items: QueryDescriptor[]): [string, QueryDescriptor[]][] {

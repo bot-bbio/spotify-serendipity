@@ -24,6 +24,7 @@ export interface EntityStat {
   finishCount: number;
   hour: Uint32Array; // length 24 (local hour-of-day)
   weekday: Uint32Array; // length 7 (0 = Sunday, local time)
+  month: Uint32Array; // length 12 (0 = January, local time)
   events: number[]; // column indices, ascending ts
 }
 
@@ -72,11 +73,12 @@ export function buildIndex(ds: Dataset): StatsIndex {
     const d = new Date(t);
     const hour = d.getHours();
     const weekday = d.getDay();
+    const month = d.getMonth();
     const skipped = ms < QUALIFIED_MS || dicts.reasons[c.reasonEnd[i]] === 'fwdbtn';
     const finished = dicts.reasons[c.reasonEnd[i]] === 'trackdone';
 
-    bump(idx.track, trackId, i, t, ms, hour, weekday, skipped, finished);
-    bump(idx.artist, artistId, i, t, ms, hour, weekday, skipped, finished);
+    bump(idx.track, trackId, i, t, ms, hour, weekday, month, skipped, finished);
+    bump(idx.artist, artistId, i, t, ms, hour, weekday, month, skipped, finished);
     addDistinct(artistTracks, artistId, trackId);
 
     if (track.album !== null) {
@@ -91,7 +93,7 @@ export function buildIndex(ds: Dataset): StatsIndex {
         idx.albumLabels.set(albumId, { artistId, album: track.album });
       }
       idx.trackAlbumId[trackId] = albumId;
-      bump(idx.album, albumId, i, t, ms, hour, weekday, skipped, finished);
+      bump(idx.album, albumId, i, t, ms, hour, weekday, month, skipped, finished);
       addDistinct(albumTracks, albumId, trackId);
     }
 
@@ -117,6 +119,7 @@ function bump(
   ms: number,
   hour: number,
   weekday: number,
+  month: number,
   skipped: boolean,
   finished: boolean,
 ): void {
@@ -134,6 +137,7 @@ function bump(
       finishCount: 0,
       hour: new Uint32Array(24),
       weekday: new Uint32Array(7),
+      month: new Uint32Array(12),
       events: [],
     };
     map.set(id, s);
@@ -147,6 +151,7 @@ function bump(
   if (finished) s.finishCount++;
   s.hour[hour]++;
   s.weekday[weekday]++;
+  s.month[month]++;
   s.events.push(i); // ascending ts, since we iterate columns in order
 }
 

@@ -9,10 +9,15 @@ export function hours(ms: number): string {
 export function relTime(epoch: number, now: number = Date.now()): string {
   const days = Math.max(0, (now - epoch) / 86_400_000);
   if (days < 1) return 'today';
-  if (days < 45) return `${Math.round(days)} days ago`;
+  if (days < 45) return plural(Math.round(days), 'day');
   const months = days / 30.44;
-  if (months < 18) return `${Math.round(months)} months ago`;
+  if (months < 18) return plural(Math.round(months), 'month');
   return `${(days / 365.25).toFixed(1)} years ago`;
+}
+
+/** "1 day ago" / "3 days ago" — rounded counts need the singular form too. */
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? '' : 's'} ago`;
 }
 
 /** Milliseconds as `m:ss` for the player scrubber, e.g. 75_000 → "1:15". */

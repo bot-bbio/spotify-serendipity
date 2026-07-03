@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { mmss, spotifyUrl } from './format.js';
+import { mmss, relTime, spotifyUrl } from './format.js';
+
+describe('relTime', () => {
+  const DAY = 86_400_000;
+  const now = Date.UTC(2026, 6, 1);
+
+  it('uses singular units for a rounded count of one (regression: "1 days ago")', () => {
+    expect(relTime(now - 1.2 * DAY, now)).toBe('1 day ago');
+    expect(relTime(now - 45.2 * DAY, now)).toBe('1 month ago');
+  });
+
+  it('keeps plural units and the coarse buckets', () => {
+    expect(relTime(now - 0.5 * DAY, now)).toBe('today');
+    expect(relTime(now - 3 * DAY, now)).toBe('3 days ago');
+    expect(relTime(now - 90 * DAY, now)).toBe('3 months ago');
+    expect(relTime(now - 730 * DAY, now)).toBe('2.0 years ago');
+  });
+});
 
 describe('mmss', () => {
   it('formats milliseconds as m:ss with a zero-padded seconds field', () => {

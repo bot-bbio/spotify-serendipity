@@ -34,7 +34,9 @@ vi.mock('./ui/useSpotify.js', () => ({
         },
       },
     },
+    volume: 0.8,
     login: vi.fn(), logout: vi.fn(), play: vi.fn(), toggle: vi.fn(), seek: vi.fn(),
+    setVolume: vi.fn(), toggleMute: vi.fn(),
   }),
 }));
 

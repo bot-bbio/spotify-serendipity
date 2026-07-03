@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 const toggle = vi.fn();
 const seek = vi.fn();
+const setVolume = vi.fn();
+const toggleMute = vi.fn();
 
 vi.mock('./db/store.js', () => ({
   loadDataset: vi.fn().mockResolvedValue(null),
@@ -40,11 +42,14 @@ vi.mock('./ui/useSpotify.js', () => ({
         },
       },
     },
+    volume: 0.8,
     login: vi.fn(),
     logout: vi.fn(),
     play: vi.fn(),
     toggle,
     seek,
+    setVolume,
+    toggleMute,
   }),
 }));
 
@@ -84,5 +89,17 @@ describe('in-browser player controls', () => {
 
     fireEvent.input(range, { target: { value: '30000' } });
     expect(seek).toHaveBeenCalledWith(30_000);
+
+    // Volume: slider reflects the hook (0.8 -> 80) and both controls are wired.
+    const vol = document.querySelector('.pb-volume') as HTMLInputElement;
+    expect(vol).toBeTruthy();
+    expect(vol.value).toBe('80');
+    fireEvent.input(vol, { target: { value: '40' } });
+    expect(setVolume).toHaveBeenCalledWith(0.4);
+
+    const mute = document.querySelector('.pb-mute') as HTMLButtonElement;
+    expect(mute.getAttribute('aria-label')).toBe('Mute'); // volume > 0
+    fireEvent.click(mute);
+    expect(toggleMute).toHaveBeenCalledTimes(1);
   });
 });
