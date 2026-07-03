@@ -1,6 +1,6 @@
 # Serendipity — Open TODOs
 
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-03_
 
 Tracking the bug-fix pass on playback, enrichment, and the mad-lib UI. The key
 finding: the three reported symptoms below **do not reproduce in the test harness** —
@@ -10,6 +10,11 @@ browser), and need DevTools data from a real connected session to fix correctly
 (this repo's rule: reproduce before fixing).
 
 ## Open bugs (need live DevTools capture)
+
+_Re-confirmed 2026-07-03: the in-repo guards the hypotheses lean on are all present
+and correct — idempotent single mount (`src/main.tsx:12`), cached SDK controller
+(`src/ui/useSpotify.ts:84` `controllerRef`), shared refresh promise. No new
+in-harness reproduction found; these still need a real connected session to fix._
 
 ### 1. "Two clicks to execute" — Surprise needs a second click
 - **Reported:** Even repeating the same selection, the first Surprise click appears to do nothing; a second click shows a result.
@@ -29,18 +34,14 @@ browser), and need DevTools data from a real connected session to fix correctly
 - **Leading hypothesis:** part inherent (stream-start buffering + `PUT /me/player/play` round-trip), part the post-play `getCurrentState` poll loop (up to 5×250ms) in `src/ui/useSpotify.ts`. First-play warm-up can be removed by pre-warming the SDK on connect (the connect click is a valid user gesture for autoplay).
 - **Capture:** Network — after "Play here", find `PUT …/v1/me/player/play`: status + rough time-to-audio (1s? 5s? only after a 2nd click?). Need magnitude to tell bug from inherent latency.
 
-## Confirmed defect — ready to fix
-
-- **`--accent-hover` is undefined.** Referenced 4× (`src/style.css` lines ~311, 351, 363, 458) but never declared in `:root` (only `--accent`, `--accent-2`, `--accent-glow` exist). The entity dropdown text, the selected criterion chip, and the card "kind" label fall back to inherited white instead of the intended green.
-  - Fix: add to `:root` → `--accent-hover: var(--accent-2);`
-  - (Left out of the test-commit because `style.css` has separate in-progress edits.)
-
 ## Regression tests added (committed)
 
 - `src/app.surprise.test.ts` — single-click resolution after entity/criterion switches, asserts correct kind.
 - `src/app.enrich.test.ts` — connected path renders card + artwork on the first click (real `useEnrichment`, stubbed network).
 - Also tightened the outcome assertion (the always-present footer `.muted` span made the prior `.card ?? .muted` check trivially true).
+- `src/style.test.ts` — asserts every `var(--foo)` in `style.css` resolves to a declared custom property (guards the `--accent-hover` class of silent-fallback bug). Reads the file via `node:fs` because vitest stubs `.css` imports to empty; `node:fs` typed by the local sliver in `src/test/node-shims.d.ts`.
 
 ## Done / not a bug
 
+- **`--accent-hover` was undefined — FIXED (2026-07-03).** Referenced 4× in `src/style.css` (now lines 312/352/364/459) but never declared in `:root`, so the entity dropdown text, selected criterion chip, and card "kind" label fell back to inherited white instead of green. Fix: added `--accent-hover: var(--accent-2);` to `:root`. Guarded by `src/style.test.ts` (verified: both assertions fail with the declaration removed).
 - Concurrent refresh race — already fixed (`src/api/auth.ts` shares one `refreshInFlight` promise).
