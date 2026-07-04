@@ -1,6 +1,23 @@
 # Serendipity — Open TODOs
 
-_Last updated: 2026-07-03 (portfolio-polish pass: GUI overhaul, criteria expansion, bug fixes)_
+_Last updated: 2026-07-04 (Spotify showcase pass: Time Capsules, Then vs Now, ♥ save + queue)_
+
+## Shipped 2026-07-04 — Spotify API showcase
+
+- **Time Capsules**: phrase → private playlist (`POST /me/playlists` → `POST
+  /playlists/{id}/items`) with a canvas-rendered cover (`PUT /playlists/{id}/images`,
+  base64 JPEG, verified 18–37 KB in real Chrome). Cover upload is deliberately
+  best-effort. Scopes: `playlist-modify-private`, `ugc-image-upload`.
+- **Then vs Now**: `GET /me/top/artists` (three affinity windows) joined against the
+  local index — still / new era / lost. Lazy fetch on expand; per-range cache.
+  Scope: `user-top-read`.
+- **♥ save + queue** on the result card: consolidated `/me/library` endpoints
+  (contains/save/remove, track URIs straight from the export) and
+  `POST /me/player/queue` (existing playback scope; button shown only while a
+  device is active).
+- **Scope re-consent**: sessions minted before the new scopes get a "Reconnect"
+  hint on 403 insufficient-scope (refresh tokens never gain scopes) — needs a
+  quick live confirmation on a real under-scoped session.
 
 ## Resolved this pass (root causes found)
 

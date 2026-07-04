@@ -35,11 +35,19 @@ your device and lets you query it.
   compact columnar store in IndexedDB; queried against a precomputed stats index.
 - **Listen to any pick** — open it in the Spotify app via a deep link, or play the full
   track in-browser with the Web Playback SDK (Spotify Premium): play/pause, seek,
-  volume + mute in a floating transport bar.
+  volume + mute in a floating transport bar, plus one-tap **add to queue** and a
+  **♥ save** that knows whether the track is already in your library.
+- **Time Capsules** — one click turns the current phrase into a *real private
+  playlist* on your account: 25 tracks sampled from your history, plus a
+  canvas-generated cover with the phrase rendered on it.
+- **Then vs Now** — your live top artists (4-week / 6-month / ~1-year affinity)
+  joined against your export era: still on repeat, new era, lost classics.
 - **Optional enrichment** (Authorization Code + PKCE) for artist artwork and genres.
 - **Self-contained by policy** — strict CSP (`default-src 'self'`), fonts bundled
   locally (no CDN), a frame guard against clickjacking, and offline-capable via a
-  precaching service worker.
+  precaching service worker. Every Web API call uses the current, non-deprecated
+  endpoints (`/me/playlists`, `/playlists/{id}/items`, the consolidated
+  `/me/library`, `/me/top`), with 429 backoff honoring `Retry-After`.
 
 ## Data flow
 
@@ -71,4 +79,5 @@ npm run dev     # start the app (runs on synthetic data until you import an expo
 Phases 1–2 complete — offline engine, mad-lib UI, and deep-link play, plus PKCE auth,
 in-browser Web Playback SDK, and artist/track enrichment. Phase 3 polish underway:
 restyled Spotify-dark UI (self-hosted variable fonts, SVG iconography), six criteria
-groups, and live browser verification of the production build. 91 passing tests.
+groups, Time Capsule playlists, Then vs Now, and live browser verification of the
+production build. 126 passing tests.

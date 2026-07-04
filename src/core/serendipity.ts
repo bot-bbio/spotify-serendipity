@@ -358,6 +358,19 @@ export class Engine {
     return best >= 0 ? this.ds.dicts.tracks[best].uri : undefined;
   }
 
+  /** The export's heaviest artists by qualified plays (for Then vs Now). */
+  topArtists(limit: number): Candidate[] {
+    return this.entityStats('artist')
+      .sort((a, b) => b.qualified - a.qualified)
+      .slice(0, limit)
+      .map((s) => this.toCandidate('artist', s));
+  }
+
+  /** Every artist name in the export (Then vs Now's "never played" check). */
+  allArtistNames(): readonly string[] {
+    return this.ds.dicts.artists;
+  }
+
   // ---- dataset introspection (drives the UI's param controls) -------------
 
   /** Calendar years (UTC, ascending) spanned by the dataset; [] when empty. */

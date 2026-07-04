@@ -27,12 +27,20 @@ export const API_BASE = 'https://api.spotify.com/v1';
 export const PLAYBACK_SDK_SRC = 'https://sdk.scdn.co/spotify-player.js';
 
 /**
- * Minimum scopes for Phase 2 (STRATEGY §8) — nothing broad, and no history or
- * library scopes since the app never polls:
+ * Requested scopes — each maps to a shipped feature, nothing preemptive:
  * - `streaming`                    Web Playback SDK in-browser playback (Premium).
  * - `user-read-email` / `-private` required companions of `streaming`.
- * - `user-modify-playback-state`   start/stop playback on the SDK device.
+ * - `user-modify-playback-state`   start/stop playback + add-to-queue on the SDK device.
  * - `user-read-playback-state`     read the active device / player state.
+ * - `playlist-modify-private`      Time Capsules: create the private playlist + name it.
+ * - `ugc-image-upload`             Time Capsules: upload the generated cover art.
+ * - `user-top-read`                Then vs Now: the user's live top artists.
+ * - `user-library-read`            the ♥ button's "already saved?" check.
+ * - `user-library-modify`          the ♥ button's save / remove.
+ *
+ * Note: a refresh token only carries the scopes it was minted with — sessions
+ * created before a scope was added get 403 "insufficient scope" on the new
+ * endpoints until the user reconnects (see `isInsufficientScope` in spotify.ts).
  */
 export const SCOPES = [
   'streaming',
@@ -40,6 +48,11 @@ export const SCOPES = [
   'user-read-private',
   'user-modify-playback-state',
   'user-read-playback-state',
+  'playlist-modify-private',
+  'ugc-image-upload',
+  'user-top-read',
+  'user-library-read',
+  'user-library-modify',
 ] as const;
 
 /**

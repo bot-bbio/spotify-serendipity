@@ -1,15 +1,30 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import {
+  addToQueue,
+  getTopArtists,
+  isInsufficientScope,
+  type TopTimeRange,
+} from './api/spotify.js';
 import { build } from './core/pipeline.js';
 import { rng, weightedPick } from './core/random.js';
-import { descriptorsFor, type QueryDescriptor, REGISTRY_BY_ID } from './core/registry.js';
+import {
+  descriptorsFor,
+  DURATION_CHOICES,
+  ENTITY_LABELS,
+  type QueryDescriptor,
+  REGISTRY_BY_ID,
+} from './core/registry.js';
 import { type Candidate, Engine } from './core/serendipity.js';
 import { buildIndex } from './core/statsIndex.js';
+import { computeThenVsNow, type ThenVsNowItem, type ThenVsNowResult } from './core/thenVsNow.js';
 import { clearDataset, loadDataset, saveDataset } from './db/store.js';
 import { makeSynthetic } from './fixtures/synthetic.js';
 import type { Entity } from './types/playevent.js';
+import { CapsuleError, type CapsuleResult, createTimeCapsule } from './ui/capsule.js';
 import { type Enrichment, useEnrichment } from './ui/useEnrichment.js';
 import { hours, mmss, relTime, spotifyUrl } from './ui/format.js';
+import { type SavedState, useSaved } from './ui/useSaved.js';
 import { type SpotifyHook, useSpotify } from './ui/useSpotify.js';
 import type { ImportResponse } from './workers/protocol.js';
 
@@ -27,11 +42,9 @@ interface ParamEnv {
   dateMax?: string;
 }
 
-const ENTITIES: { value: Entity; label: string }[] = [
-  { value: 'artist', label: 'an artist' },
-  { value: 'album', label: 'an album' },
-  { value: 'track', label: 'a song' },
-];
+const ENTITIES: { value: Entity; label: string }[] = (
+  ['artist', 'album', 'track'] as Entity[]
+).map((value) => ({ value, label: ENTITY_LABELS[value] }));
 
 // One PRNG for the whole session: re-seeding per click (the old `rng(Date.now())`)
 // made two clicks in the same millisecond replay the identical pick.
@@ -285,6 +298,16 @@ export function App() {
             <IconDice /> Surprise me
           </button>
 
+          {spotify.status === 'connected' && active && (
+            <CapsulePanel
+              engine={engine}
+              descriptor={active}
+              entity={entity}
+              param={param}
+              onReconnect={spotify.login}
+            />
+          )}
+
           <SpotifyConnect s={spotify} />
           {spotify.error && <p class="error">{spotify.error}</p>}
 
@@ -295,12 +318,18 @@ export function App() {
               playUri={resultUri}
               enrichment={enrichment}
               canPlayHere={spotify.status === 'connected'}
+              canQueue={spotify.status === 'connected' && spotify.current !== null}
               premiumRequired={spotify.premiumRequired}
               onPlayHere={spotify.play}
+              onReconnect={spotify.login}
             />
           )}
           {noMatch && !result && (
             <p class="muted no-match">No match for that one — try another phrase.</p>
+          )}
+
+          {spotify.status === 'connected' && (
+            <ThenVsNowSection engine={engine} onReconnect={spotify.login} />
           )}
 
           {spotify.current && (
@@ -334,6 +363,263 @@ export function App() {
 
 function Pill({ children }: { children: ComponentChildren }) {
   return <span class="pill">{children}</span>;
+}
+
+/** Offered when a feature 403s because the session predates its scope. */
+function ReconnectHint({ feature, onReconnect }: { feature: string; onReconnect: () => void }) {
+  return (
+    <p class="reconnect">
+      Spotify needs a fresh permission for {feature}.{' '}
+      <button class="link" onClick={onReconnect}>
+        Reconnect
+      </button>
+    </p>
+  );
+}
+
+type CapsuleStatus =
+  | { kind: 'idle' }
+  | { kind: 'working' }
+  | { kind: 'done'; result: CapsuleResult }
+  | { kind: 'error'; message: string; scope: boolean };
+
+/**
+ * Time Capsules: one click turns the assembled phrase into a real private
+ * playlist (sampled tracks + generated cover) on the user's account.
+ */
+function CapsulePanel({
+  engine,
+  descriptor,
+  entity,
+  param,
+  onReconnect,
+}: {
+  engine: Engine;
+  descriptor: QueryDescriptor;
+  entity: Entity;
+  param: string | number | undefined;
+  onReconnect: () => void;
+}) {
+  const [state, setState] = useState<CapsuleStatus>({ kind: 'idle' });
+
+  // A new phrase is a new capsule — drop any previous outcome.
+  useEffect(() => {
+    setState({ kind: 'idle' });
+  }, [descriptor.id, entity, param]);
+
+  async function save() {
+    setState({ kind: 'working' });
+    try {
+      const result = await createTimeCapsule({
+        engine,
+        descriptor,
+        entity,
+        param,
+        rand: surpriseRand,
+      });
+      setState({ kind: 'done', result });
+    } catch (e) {
+      setState({
+        kind: 'error',
+        message:
+          e instanceof CapsuleError || e instanceof Error
+            ? e.message
+            : 'Could not create the playlist.',
+        scope: isInsufficientScope(e),
+      });
+    }
+  }
+
+  if (state.kind === 'done') {
+    return (
+      <p class="capsule-done">
+        <span>
+          Saved <strong>{state.result.trackCount} tracks</strong> to your Spotify —{' '}
+        </span>
+        <a class="capsule-link" href={state.result.url} target="_blank" rel="noreferrer">
+          open the playlist <IconExternal />
+        </a>
+      </p>
+    );
+  }
+  return (
+    <>
+      <button class="capsule" onClick={() => void save()} disabled={state.kind === 'working'}>
+        <IconPlaylistAdd />
+        {state.kind === 'working' ? 'Creating your playlist…' : 'Save this phrase as a playlist'}
+      </button>
+      {state.kind === 'error' &&
+        (state.scope ? (
+          <ReconnectHint feature="creating playlists" onReconnect={onReconnect} />
+        ) : (
+          <p class="error">{state.message}</p>
+        ))}
+    </>
+  );
+}
+
+const TVN_RANGES: { value: TopTimeRange; label: string }[] = [
+  { value: 'short_term', label: '4 weeks' },
+  { value: 'medium_term', label: '6 months' },
+  { value: 'long_term', label: '~1 year' },
+];
+
+/**
+ * Then vs Now: the user's live top artists (Web API) joined against their
+ * export-era heavyweights (local index). Fetches lazily on first expand so an
+ * under-scoped session sees a reconnect offer only when it asks for the panel.
+ */
+function ThenVsNowSection({ engine, onReconnect }: { engine: Engine; onReconnect: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [range, setRange] = useState<TopTimeRange>('medium_term');
+  const [results, setResults] = useState<ReadonlyMap<TopTimeRange, ThenVsNowResult>>(new Map());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [scopeBlocked, setScopeBlocked] = useState(false);
+
+  useEffect(() => {
+    if (!open || results.has(range) || scopeBlocked) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getTopArtists(range)
+      .then((live) => {
+        if (cancelled) return;
+        const exportTop = engine
+          .topArtists(75)
+          .map((c) => ({ name: c.label, plays: c.qualified }));
+        const result = computeThenVsNow(
+          exportTop,
+          engine.allArtistNames(),
+          live.map((a) => ({
+            name: a.name,
+            imageUrl: a.images[1]?.url ?? a.images[0]?.url,
+            url: a.external_urls.spotify,
+          })),
+        );
+        setResults((prev) => new Map(prev).set(range, result));
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        if (isInsufficientScope(e)) setScopeBlocked(true);
+        else setError('Could not load your live top artists — try again in a moment.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, range, results, scopeBlocked, engine]);
+
+  const result = results.get(range);
+  return (
+    <section class="tvn">
+      <button class="tvn-toggle" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen(!open)}>
+        <IconCompare /> Then vs Now
+        <span class="tvn-sub">your export era against your live rotation</span>
+      </button>
+      {open && (
+        <div class="tvn-body">
+          <div class="segmented tvn-ranges" role="tablist">
+            {TVN_RANGES.map((r) => (
+              <button
+                type="button"
+                class="seg"
+                role="tab"
+                aria-selected={r.value === range ? 'true' : 'false'}
+                onClick={() => setRange(r.value)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {scopeBlocked && <ReconnectHint feature="your live top artists" onReconnect={onReconnect} />}
+          {error && <p class="error">{error}</p>}
+          {loading && <p class="muted tvn-loading">Comparing eras…</p>}
+          {result && !loading && (
+            <>
+              <TvnGroup
+                title="Still on repeat"
+                hint="big in your export, big right now"
+                items={result.still}
+                empty="No overlap — your rotation has completely turned over."
+              />
+              <TvnGroup
+                title="New era"
+                hint="in your rotation now, never once in your export"
+                items={result.newEra}
+                empty="No brand-new names — everything you play now, past-you knew."
+              />
+              <TvnGroup
+                title="Lost classics"
+                hint="export heavyweights gone from your rotation"
+                items={result.lost}
+                empty="Nothing lost — your old favorites are all still around."
+              />
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TvnGroup({
+  title,
+  hint,
+  items,
+  empty,
+}: {
+  title: string;
+  hint: string;
+  items: ThenVsNowItem[];
+  empty: string;
+}) {
+  return (
+    <div class="tvn-group">
+      <div class="tvn-head">
+        <h3>{title}</h3>
+        <span class="tvn-hint">{hint}</span>
+      </div>
+      {items.length === 0 ? (
+        <p class="muted tvn-empty">{empty}</p>
+      ) : (
+        <ul class="tvn-list">
+          {items.map((a) => (
+            <li>
+              <TvnArtist a={a} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function TvnArtist({ a }: { a: ThenVsNowItem }) {
+  const body = (
+    <>
+      {a.imageUrl ? (
+        <img class="tvn-avatar" src={a.imageUrl} alt="" loading="lazy" />
+      ) : (
+        <span class="tvn-avatar tvn-initial" aria-hidden="true">
+          {a.name.slice(0, 1).toUpperCase()}
+        </span>
+      )}
+      <span class="tvn-name">{a.name}</span>
+      {a.playsThen !== undefined && (
+        <span class="tvn-plays">{a.playsThen.toLocaleString()} plays then</span>
+      )}
+    </>
+  );
+  return a.url ? (
+    <a class="tvn-artist" href={a.url} target="_blank" rel="noreferrer">
+      {body}
+    </a>
+  ) : (
+    <span class="tvn-artist">{body}</span>
+  );
 }
 
 function ParamControl({
@@ -396,12 +682,10 @@ function ParamControl({
   // duration
   return (
     <Pill>
-      <select value={Number(value ?? 365)} onChange={(e) => onChange(Number((e.currentTarget as HTMLSelectElement).value))}>
-        <option value={30}>a month</option>
-        <option value={91}>three months</option>
-        <option value={182}>six months</option>
-        <option value={365}>a year</option>
-        <option value={730}>two years</option>
+      <select value={String(value ?? 365)} onChange={(e) => onChange(Number((e.currentTarget as HTMLSelectElement).value))}>
+        {DURATION_CHOICES.map((c) => (
+          <option value={c.value}>{c.label}</option>
+        ))}
       </select>
     </Pill>
   );
@@ -453,17 +737,22 @@ function ResultCard({
   playUri,
   enrichment,
   canPlayHere,
+  canQueue,
   premiumRequired,
   onPlayHere,
+  onReconnect,
 }: {
   c: Candidate;
   playUri?: string;
   enrichment: Enrichment | null;
   canPlayHere: boolean;
+  canQueue: boolean;
   premiumRequired: boolean;
   onPlayHere: (uri: string) => void;
+  onReconnect: () => void;
 }) {
   const url = spotifyUrl(playUri);
+  const savedState = useSaved(canPlayHere, playUri);
   const ref = useRef<HTMLElement>(null);
   // Keyed by the surprise nonce, the card remounts per pick; make sure the fresh
   // result is actually visible (on small screens it can land below the fold).
@@ -511,11 +800,65 @@ function ResultCard({
             <IconExternal /> Open in Spotify
           </a>
         )}
+        {canQueue && playUri && <QueueButton uri={playUri} />}
+        <HeartButton s={savedState} />
       </div>
+      {savedState.scopeBlocked && (
+        <ReconnectHint feature="saving tracks" onReconnect={onReconnect} />
+      )}
       {premiumRequired && (
         <p class="premium-note">In-browser playback needs Spotify Premium.</p>
       )}
     </article>
+  );
+}
+
+/** ♥ toggle for the pick's (representative) track, shown once its state is known. */
+function HeartButton({ s }: { s: SavedState }) {
+  if (s.saved === null) return null;
+  return (
+    <button
+      class={`heart${s.saved ? ' on' : ''}`}
+      aria-pressed={s.saved ? 'true' : 'false'}
+      aria-label={s.saved ? 'Remove from your library' : 'Save to your library'}
+      title={s.saved ? 'In your library — click to remove' : 'Save this track to your library'}
+      onClick={() => void s.toggle()}
+    >
+      <IconHeart filled={s.saved} />
+    </button>
+  );
+}
+
+/** Queue the pick after the current track (needs an active device = player bar showing). */
+function QueueButton({ uri }: { uri: string }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  async function queue() {
+    setState('busy');
+    try {
+      await addToQueue(uri);
+      setState('done');
+    } catch {
+      setState('error');
+    }
+    timer.current = setTimeout(() => setState('idle'), 2200);
+  }
+
+  return (
+    <button
+      class="queue"
+      onClick={() => void queue()}
+      disabled={state === 'busy'}
+      aria-label="Add to the playback queue"
+    >
+      {state === 'done' ? '✓ Queued' : state === 'error' ? "Couldn't queue" : (
+        <>
+          <IconQueue /> Queue
+        </>
+      )}
+    </button>
   );
 }
 
@@ -687,6 +1030,73 @@ function IconVolumeMuted() {
   );
 }
 
+function IconHeart({ filled }: { filled: boolean }) {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path
+        d="M12 20.3 4.9 13a4.8 4.8 0 0 1 0-6.8 4.7 4.7 0 0 1 6.7 0l.4.4.4-.4a4.7 4.7 0 0 1 6.7 0 4.8 4.8 0 0 1 0 6.8L12 20.3z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconQueue() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path
+        d="M4 6h12M4 11h12M4 16h7"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+      <path
+        d="M18 13v6m-3-3h6"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconPlaylistAdd() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path
+        d="M4 6h12M4 11h12M4 16h6"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+      <circle cx="17.5" cy="16.5" r="1.6" fill="currentColor" />
+      <path d="M19 8.5v6.5" stroke="currentColor" stroke-width="1.8" fill="none" />
+      <path d="M19 8.5c1 .3 2 .3 3-.4" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function IconCompare() {
+  return (
+    <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
+      <path
+        d="M8 7h11m0 0-3-3m3 3-3 3M16 17H5m0 0 3-3m-3 3 3 3"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
 function IconHeadphones() {
   return (
     <svg class="icon" viewBox="0 0 24 24" width="1em" height="1em" aria-hidden="true">
@@ -722,7 +1132,7 @@ function defaultParam(d: QueryDescriptor, env: ParamEnv): string | number | unde
 }
 
 function entityLabel(entity: Entity): string {
-  return ENTITIES.find((o) => o.value === entity)?.label ?? entity;
+  return ENTITY_LABELS[entity] ?? entity;
 }
 
 /** Pill label: the phrase with any inline blank collapsed to an ellipsis. */

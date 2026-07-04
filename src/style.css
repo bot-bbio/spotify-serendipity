@@ -671,6 +671,277 @@ header h1 {
   margin: 14px 0 0;
 }
 
+/* ---- reconnect hint (scope re-consent) --------------------------------------- */
+
+.reconnect {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* ---- Time Capsules -------------------------------------------------------------- */
+
+.capsule {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  font-family: var(--font-ui);
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px dashed var(--surface-3);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+
+.capsule:hover {
+  color: var(--accent-hover);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.capsule:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.capsule-done {
+  margin: 10px 0 0;
+  padding: 12px 18px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  background: var(--accent-soft);
+  border: 1px solid rgba(29, 185, 84, 0.35);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+.capsule-link {
+  color: var(--accent-hover);
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.capsule-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- Then vs Now ------------------------------------------------------------------ */
+
+.tvn {
+  margin-top: 24px;
+}
+
+.tvn-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 18px;
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text);
+  background: var(--surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease);
+}
+
+.tvn-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.tvn-toggle .icon {
+  color: var(--accent-2);
+}
+
+.tvn-sub {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 450;
+  color: var(--muted);
+  text-align: right;
+}
+
+.tvn-body {
+  margin-top: 10px;
+  background: var(--surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  box-shadow: var(--glass-shadow);
+  animation: rise 0.3s var(--ease-out);
+}
+
+.tvn-ranges {
+  margin-bottom: 6px;
+}
+
+.tvn-loading,
+.tvn-empty {
+  font-size: 0.88rem;
+  margin: 10px 0;
+}
+
+.tvn-group {
+  margin-top: 18px;
+}
+
+.tvn-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tvn-head h3 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.tvn-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.tvn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tvn-artist {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 0.15s var(--ease);
+}
+
+a.tvn-artist:hover {
+  background: var(--surface-2);
+}
+
+.tvn-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.tvn-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.tvn-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tvn-plays {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- card extras: ♥ save + queue --------------------------------------------------- */
+
+.heart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--surface-3);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease);
+}
+
+.heart:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.heart:active {
+  transform: scale(0.92);
+}
+
+.heart.on {
+  color: var(--accent-2);
+  border-color: rgba(29, 185, 84, 0.5);
+  background: var(--accent-soft);
+}
+
+.queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--surface-3);
+  cursor: pointer;
+  transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+
+.queue:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: var(--surface-2);
+}
+
+.queue:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* ---- Spotify connect ---------------------------------------------------------------- */
 
 .connect {

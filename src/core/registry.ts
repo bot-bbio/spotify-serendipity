@@ -34,6 +34,22 @@ const ALL: Entity[] = ['artist', 'album', 'track'];
 const TRACK_ONLY: Entity[] = ['track'];
 const ARTIST_ONLY: Entity[] = ['artist'];
 
+/** Mad-lib wording for each entity ("Show me *an artist* …"). */
+export const ENTITY_LABELS: Record<Entity, string> = {
+  artist: 'an artist',
+  album: 'an album',
+  track: 'a song',
+};
+
+/** The options behind every `{duration}` blank (value = days), shared with the UI. */
+export const DURATION_CHOICES: ParamChoice[] = [
+  { value: '30', label: 'a month' },
+  { value: '91', label: 'three months' },
+  { value: '182', label: 'six months' },
+  { value: '365', label: 'a year' },
+  { value: '730', label: 'two years' },
+];
+
 /** Hour-of-day windows behind the "I tend to play {daypart}" choices. */
 const DAYPARTS: Record<string, { from: number; to: number }> = {
   morning: { from: 5, to: 11 },
@@ -171,6 +187,25 @@ export const REGISTRY_BY_ID: Map<string, QueryDescriptor> = new Map(
 /** Descriptors applicable to a given entity, for building the criterion pill. */
 export function descriptorsFor(entity: Entity): QueryDescriptor[] {
   return REGISTRY.filter((d) => d.entities.includes(entity));
+}
+
+/**
+ * The phrase with its blank filled in as plain text — "I played back in 2021",
+ * "I haven't played in six months", "I tend to play late at night". Used
+ * anywhere the assembled query must exist outside the live UI (playlist names,
+ * cover art, descriptions).
+ */
+export function renderPhrase(d: QueryDescriptor, param: ParamValue | undefined): string {
+  const blank = /\{[a-z-]+\}/i.exec(d.phrase)?.[0];
+  if (!blank || d.param === 'none') return d.phrase;
+  return d.phrase.replace(blank, paramLabel(d, param));
+}
+
+/** Human wording for a param value: choice labels, duration words, raw year/date. */
+function paramLabel(d: QueryDescriptor, param: ParamValue | undefined): string {
+  const raw = String(param ?? '');
+  const choices = d.param === 'duration' ? DURATION_CHOICES : d.choices;
+  return choices?.find((c) => c.value === raw)?.label ?? raw;
 }
 
 function numberParam(p: ParamValue | undefined, fallback: number): number {

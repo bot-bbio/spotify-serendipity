@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { makeSynthetic } from '../fixtures/synthetic.js';
 import { buildEngine } from './pipeline.js';
-import { descriptorsFor, REGISTRY } from './registry.js';
+import { descriptorsFor, REGISTRY, REGISTRY_BY_ID, renderPhrase } from './registry.js';
+
+describe('renderPhrase (the assembled query as prose)', () => {
+  it('fills each blank kind with human wording', () => {
+    expect(renderPhrase(REGISTRY_BY_ID.get('dormant')!, 182)).toBe(
+      "I haven't played in six months",
+    );
+    expect(renderPhrase(REGISTRY_BY_ID.get('weekday')!, '5')).toBe('I play on Fridays');
+    expect(renderPhrase(REGISTRY_BY_ID.get('from-year')!, 2021)).toBe('I played back in 2021');
+    expect(renderPhrase(REGISTRY_BY_ID.get('on-date')!, '2022-06-15')).toBe(
+      'I listened to on 2022-06-15',
+    );
+  });
+
+  it('returns a no-blank phrase unchanged', () => {
+    expect(renderPhrase(REGISTRY_BY_ID.get('binge')!, undefined)).toBe(
+      'I binged once, then dropped',
+    );
+  });
+});
 
 describe('query registry', () => {
   const engine = buildEngine(makeSynthetic(4000, 7), Date.UTC(2025, 5, 15));

@@ -1,7 +1,13 @@
 /**
- * Thin, typed Spotify Web API client for Phase 2: enrichment (artist artwork +
- * genres, track album art) and player control (transfer / play / pause on the
- * Web Playback SDK device).
+ * Thin, typed Spotify Web API client: enrichment (artist artwork + genres,
+ * track album art), player control (transfer / play / pause / queue on the Web
+ * Playback SDK device), playlists (Time Capsules: create / fill / cover), the
+ * consolidated library (♥ save), and the user's live top items (Then vs Now).
+ *
+ * Every endpoint here is the current, non-deprecated variant from the official
+ * OpenAPI schema — notably `POST /me/playlists` (not the deprecated
+ * `/users/{id}/playlists`), `/playlists/{id}/items` (not `/tracks`), and the
+ * consolidated `/me/library` (not the type-specific `/me/tracks`).
  *
  * Resilience per CLAUDE.md:
  * - **429 / 5xx** → retry with `retryDelayMs` backoff that honors the server's
@@ -76,23 +82,27 @@ export function parseTrackUri(uri: string): string | null {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Request body: JSON (serialized + content-typed) or raw (pre-encoded, e.g. a base64 JPEG). */
+interface SendBody {
+  json?: unknown;
+  raw?: { content: string; contentType: string };
+}
+
 /** Authenticated GET returning parsed JSON of type `T`. */
 export function apiGet<T>(path: string): Promise<T> {
   return send<T>('GET', path);
 }
 
-async function send<T>(
-  method: string,
-  path: string,
-  jsonBody?: unknown,
-  attempt = 0,
-): Promise<T> {
+async function send<T>(method: string, path: string, body?: SendBody, attempt = 0): Promise<T> {
   const token = await getValidAccessToken();
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   const init: RequestInit = { method, headers };
-  if (jsonBody !== undefined) {
+  if (body?.json !== undefined) {
     headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(jsonBody);
+    init.body = JSON.stringify(body.json);
+  } else if (body?.raw !== undefined) {
+    headers['Content-Type'] = body.raw.contentType;
+    init.body = body.raw.content;
   }
 
   const res = await fetch(API_BASE + path, init);
@@ -100,16 +110,27 @@ async function send<T>(
   // A stale access token: drop it and retry once with a freshly refreshed one.
   if (res.status === 401 && attempt === 0) {
     invalidateAccessToken();
-    return send<T>(method, path, jsonBody, attempt + 1);
+    return send<T>(method, path, body, attempt + 1);
   }
   // Rate limited or transient server error: back off and retry.
   if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
     await sleep(retryDelayMs(attempt, res.headers.get('Retry-After')));
-    return send<T>(method, path, jsonBody, attempt + 1);
+    return send<T>(method, path, body, attempt + 1);
   }
   if (!res.ok) throw new SpotifyApiError(res.status, await errorMessage(res));
-  if (res.status === 204) return undefined as T; // player endpoints reply 204 No Content
-  return (await res.json()) as T;
+  // Several write endpoints reply 204/202 or an empty 200/201 body.
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text === '' ? undefined : JSON.parse(text)) as T;
+}
+
+/**
+ * True when the error is Spotify's 403 "insufficient client scope" — the
+ * session predates a scope this feature needs, and the fix is a fresh consent
+ * (reconnect), not a retry.
+ */
+export function isInsufficientScope(e: unknown): boolean {
+  return e instanceof SpotifyApiError && e.status === 403 && /scope/i.test(e.message);
 }
 
 async function errorMessage(res: Response): Promise<string> {
@@ -144,14 +165,96 @@ export function getTrack(id: string): Promise<TrackInfo> {
 
 /** Move playback to `deviceId` (the SDK player), optionally starting it. */
 export function transferPlayback(deviceId: string, play = false): Promise<void> {
-  return send<void>('PUT', '/me/player', { device_ids: [deviceId], play });
+  return send<void>('PUT', '/me/player', { json: { device_ids: [deviceId], play } });
 }
 
 /** Start playback of the given track URIs on `deviceId`. */
 export function playTracks(deviceId: string, uris: string[]): Promise<void> {
-  return send<void>('PUT', `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, { uris });
+  return send<void>('PUT', `/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
+    json: { uris },
+  });
 }
 
 export function pausePlayback(deviceId: string): Promise<void> {
   return send<void>('PUT', `/me/player/pause?device_id=${encodeURIComponent(deviceId)}`);
+}
+
+/**
+ * Queue a track after the current one. Targets the active device when
+ * `deviceId` is omitted (there is one whenever the player bar is showing).
+ */
+export function addToQueue(uri: string, deviceId?: string): Promise<void> {
+  const params = new URLSearchParams({ uri });
+  if (deviceId) params.set('device_id', deviceId);
+  return send<void>('POST', `/me/player/queue?${params.toString()}`);
+}
+
+// ---- playlists (Time Capsules) ---------------------------------------------
+
+export interface CreatedPlaylist {
+  id: string;
+  external_urls: { spotify: string };
+}
+
+/** Create a private playlist on the current user's account (POST /me/playlists). */
+export function createPlaylist(name: string, description: string): Promise<CreatedPlaylist> {
+  return send<CreatedPlaylist>('POST', '/me/playlists', {
+    json: { name, description, public: false },
+  });
+}
+
+/** Add up to 100 track URIs to a playlist in one request. */
+export function addPlaylistItems(playlistId: string, uris: string[]): Promise<void> {
+  if (uris.length === 0) return Promise.resolve();
+  if (uris.length > 100) throw new RangeError('Spotify accepts at most 100 items per request.');
+  return send<void>('POST', `/playlists/${encodeURIComponent(playlistId)}/items`, {
+    json: { uris },
+  });
+}
+
+/** Upload a custom cover (base64 JPEG, no data: prefix, ≤256 KB). Replies 202. */
+export function uploadPlaylistCover(playlistId: string, base64Jpeg: string): Promise<void> {
+  return send<void>('PUT', `/playlists/${encodeURIComponent(playlistId)}/images`, {
+    raw: { content: base64Jpeg, contentType: 'image/jpeg' },
+  });
+}
+
+// ---- library (♥ save) — the consolidated endpoints per CLAUDE.md -----------
+
+const uriList = (uris: string[]): string => {
+  if (uris.length === 0 || uris.length > 40) {
+    throw new RangeError('The library endpoints accept 1–40 URIs per request.');
+  }
+  return new URLSearchParams({ uris: uris.join(',') }).toString();
+};
+
+/** Which of the given URIs are already in the user's library (order-aligned). */
+export function checkLibraryContains(uris: string[]): Promise<boolean[]> {
+  return apiGet<boolean[]>(`/me/library/contains?${uriList(uris)}`);
+}
+
+export function saveToLibrary(uris: string[]): Promise<void> {
+  return send<void>('PUT', `/me/library?${uriList(uris)}`);
+}
+
+export function removeFromLibrary(uris: string[]): Promise<void> {
+  return send<void>('DELETE', `/me/library?${uriList(uris)}`);
+}
+
+// ---- top items (Then vs Now) -----------------------------------------------
+
+export type TopTimeRange = 'short_term' | 'medium_term' | 'long_term';
+
+export interface TopArtist {
+  id: string;
+  name: string;
+  images: SpotifyImage[];
+  external_urls: { spotify: string };
+}
+
+/** The user's live top artists over the given affinity window. */
+export async function getTopArtists(timeRange: TopTimeRange, limit = 50): Promise<TopArtist[]> {
+  const params = new URLSearchParams({ time_range: timeRange, limit: String(limit) });
+  const res = await apiGet<{ items: TopArtist[] }>(`/me/top/artists?${params.toString()}`);
+  return res.items;
 }
