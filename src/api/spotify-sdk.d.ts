@@ -87,6 +87,7 @@ declare namespace Spotify {
     seek(positionMs: number): Promise<void>;
     setName(name: string): Promise<void>;
     setVolume(volume: number): Promise<void>;
+    getVolume(): Promise<number>;
   }
 
   const Player: {

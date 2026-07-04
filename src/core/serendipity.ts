@@ -84,16 +84,20 @@ export class Engine {
   }
 
   /**
-   * Entities played on this month-and-day in any past year. The month/day are
+   * Entities played on this month-and-day in any *past* year. The month/day are
    * read in local time to match how {@link buildIndex} buckets `dayOfYear`, so
-   * "on this day" means the user's local calendar day, not the UTC one.
+   * "on this day" means the user's local calendar day, not the UTC one. Plays
+   * from the current year are excluded — those are "today", not history.
    */
   thisDayInHistory(opts: { entity: EntityKind; today?: number }): Candidate[] {
     const d = new Date(opts.today ?? this.now);
     const mmdd = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     const indices = this.idx.dayOfYear.get(mmdd);
     if (!indices) return [];
-    return this.candidatesFromIndices(opts.entity, indices);
+    const currentYear = d.getFullYear();
+    const ts = this.ds.columns.ts;
+    const past = indices.filter((i) => new Date(ts[i]).getFullYear() < currentYear);
+    return this.candidatesFromIndices(opts.entity, past);
   }
 
   /** Entities played within a calendar year. */
@@ -123,6 +127,15 @@ export class Engine {
       .map((s) => this.toCandidate(opts.entity, s));
   }
 
+  /** Entities first heard within the trailing `withinDays` window — fresh finds. */
+  discovered(opts: { entity: EntityKind; withinDays: number }): Candidate[] {
+    const cutoff = this.now - opts.withinDays * DAY;
+    return this.entityStats(opts.entity)
+      .filter((s) => s.first >= cutoff)
+      .sort((a, b) => b.first - a.first)
+      .map((s) => this.toCandidate(opts.entity, s));
+  }
+
   // ---- Temporal-pattern family -------------------------------------------
 
   /** Entities concentrated in an hour-of-day window (local time), e.g. late-night. */
@@ -144,6 +157,25 @@ export class Engine {
     return this.entityStats(opts.entity)
       .filter((s) => s.count >= min && s.weekday[opts.day] / s.count >= 0.34)
       .sort((a, b) => b.weekday[opts.day] / b.count - a.weekday[opts.day] / a.count)
+      .map((s) => this.toCandidate(opts.entity, s));
+  }
+
+  /**
+   * Entities concentrated in a month-of-year window (local time), e.g. summer
+   * (5–7) or winter wrapping past New Year (11–1). Same concentration shape as
+   * {@link byTimeOfDay}: at least `min` plays, ≥40% of them inside the window.
+   */
+  bySeason(opts: { entity: EntityKind; fromMonth: number; toMonth: number; min?: number }): Candidate[] {
+    const min = opts.min ?? 5;
+    return this.entityStats(opts.entity)
+      .filter(
+        (s) => s.count >= min && windowFraction(s.month, opts.fromMonth, opts.toMonth, 12) >= 0.4,
+      )
+      .sort(
+        (a, b) =>
+          windowFraction(b.month, opts.fromMonth, opts.toMonth, 12) -
+          windowFraction(a.month, opts.fromMonth, opts.toMonth, 12),
+      )
       .map((s) => this.toCandidate(opts.entity, s));
   }
 
@@ -185,6 +217,30 @@ export class Engine {
       if (maxGap >= gap && afterGap >= 2) out.push(this.toCandidate(opts.entity, s));
     }
     return out;
+  }
+
+  /**
+   * Artists you play a meaningful amount but where a single track dominates —
+   * the "one-hit wonders" of your own library.
+   */
+  oneHitWonder(opts: { minPlays?: number; share?: number } = {}): Candidate[] {
+    const minPlays = opts.minPlays ?? 10;
+    const share = opts.share ?? 0.7;
+    const trackId = this.ds.columns.trackId;
+    const out: { c: Candidate; topShare: number }[] = [];
+    for (const s of this.idx.artist.values()) {
+      if (s.count < minPlays) continue;
+      const counts = new Map<number, number>();
+      let top = 0;
+      for (const i of s.events) {
+        const n = (counts.get(trackId[i]) ?? 0) + 1;
+        counts.set(trackId[i], n);
+        if (n > top) top = n;
+      }
+      const topShare = top / s.count;
+      if (topShare >= share) out.push({ c: this.toCandidate('artist', s), topShare });
+    }
+    return out.sort((a, b) => b.topShare - a.topShare).map((o) => o.c);
   }
 
   /** A low-play track that lives under an artist you otherwise play a lot. */
@@ -242,19 +298,32 @@ export class Engine {
       .map(([id]) => this.toCandidate('track', this.idx.track.get(id)!));
   }
 
-  /** Entities played on a given platform (substring match, case-insensitive). */
-  byPlatform(opts: { entity: EntityKind; platform: string }): Candidate[] {
-    const needle = opts.platform.toLowerCase();
+  /**
+   * Entities played on a platform matching any of the given needles (substring,
+   * case-insensitive). Multiple needles let one UI choice cover a device family,
+   * e.g. "my phone" = ['ios', 'iphone', 'android'].
+   */
+  byPlatform(opts: { entity: EntityKind; platform: string | readonly string[] }): Candidate[] {
+    const needles = (typeof opts.platform === 'string' ? [opts.platform] : opts.platform).map(
+      (p) => p.toLowerCase(),
+    );
     const matchIds = new Set<number>();
     this.ds.dicts.platforms.forEach((name, id) => {
-      if (id !== 0 && name.toLowerCase().includes(needle)) matchIds.add(id);
+      const lower = name.toLowerCase();
+      if (id !== 0 && needles.some((n) => lower.includes(n))) matchIds.add(id);
     });
     return this.candidatesWhere(opts.entity, (i) => matchIds.has(this.ds.columns.platform[i]));
   }
 
-  /** Entities played outside the user's home country. */
-  whileTraveling(opts: { entity: EntityKind; home: string }): Candidate[] {
-    const homeId = this.ds.dicts.countries.indexOf(opts.home);
+  /**
+   * Entities played outside the user's home country. When `home` is omitted it
+   * is inferred as the modal country across all plays — the country you listen
+   * from most is, overwhelmingly, home.
+   */
+  whileTraveling(opts: { entity: EntityKind; home?: string }): Candidate[] {
+    const homeId =
+      opts.home !== undefined ? this.ds.dicts.countries.indexOf(opts.home) : this.homeCountryId();
+    if (homeId <= 0) return []; // no country data: "traveling" is undefined
     return this.candidatesWhere(
       opts.entity,
       (i) => this.ds.columns.country[i] !== 0 && this.ds.columns.country[i] !== homeId,
@@ -289,7 +358,46 @@ export class Engine {
     return best >= 0 ? this.ds.dicts.tracks[best].uri : undefined;
   }
 
+  // ---- dataset introspection (drives the UI's param controls) -------------
+
+  /** Calendar years (UTC, ascending) spanned by the dataset; [] when empty. */
+  yearsAvailable(): number[] {
+    const { ts, n } = this.ds.columns;
+    if (n === 0) return [];
+    const first = new Date(ts[0]).getUTCFullYear();
+    const last = new Date(ts[n - 1]).getUTCFullYear();
+    return Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  }
+
+  /** First/last event days as 'YYYY-MM-DD' (UTC, matching {@link onDate}), or null. */
+  dateRange(): { min: string; max: string } | null {
+    const { ts, n } = this.ds.columns;
+    if (n === 0) return null;
+    return {
+      min: new Date(ts[0]).toISOString().slice(0, 10),
+      max: new Date(ts[n - 1]).toISOString().slice(0, 10),
+    };
+  }
+
   // ---- internals ----------------------------------------------------------
+
+  /** Modal country id across all plays (0 when the export carries no country). */
+  private homeCountryId(): number {
+    const counts = new Map<number, number>();
+    const country = this.ds.columns.country;
+    for (let i = 0; i < this.ds.columns.n; i++) {
+      if (country[i] !== 0) counts.set(country[i], (counts.get(country[i]) ?? 0) + 1);
+    }
+    let best = 0;
+    let bestN = 0;
+    for (const [id, n] of counts) {
+      if (n > bestN) {
+        bestN = n;
+        best = id;
+      }
+    }
+    return best;
+  }
 
   private entityStats(kind: EntityKind): EntityStat[] {
     return [...this.idx[kind].values()];

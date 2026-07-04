@@ -6,6 +6,20 @@ played a lot in 2021", "something I haven't heard in a year", "a song I always s
 "what I listened to on this day in past years". The serendipity comes from your own
 history, assembled mad-lib style.
 
+## Query criteria
+
+Twenty-two criteria across six groups, each a mad-lib phrase with inline blanks
+(year, date, duration, weekday, daypart, season, device):
+
+| Group | Examples |
+|---|---|
+| **Frequency** | play constantly · a lot · in rotation · now and then · forgotten · on heavy rotation in *{year}* |
+| **Recency** | not played in *{duration}* · discovered in the last *{duration}* · binged then dropped · loved, left, came back |
+| **Date** | on *{date}* · this day in past years · back in *{year}* · earliest discoveries · first heard on *{date}* |
+| **Pattern** | in the *{morning/evening/late at night}* · on *{Mondays…Sundays}* · in the *{season}* · most hours spent |
+| **Context** | on *{my phone / my computer / the web player / a TV or console}* · while traveling (home country inferred) |
+| **Behavior** | always skip · always finish · put on repeat · deep cuts by loved artists · one-song artists |
+
 ## Why your history, not Spotify's recommendations
 
 Spotify's live Web API exposes almost no listening history (the *recently played*
@@ -20,8 +34,12 @@ your device and lets you query it.
 - **Standalone client-side PWA** — your data never leaves the browser. Parsed into a
   compact columnar store in IndexedDB; queried against a precomputed stats index.
 - **Listen to any pick** — open it in the Spotify app via a deep link, or play the full
-  track in-browser with the Web Playback SDK (Spotify Premium).
+  track in-browser with the Web Playback SDK (Spotify Premium): play/pause, seek,
+  volume + mute in a floating transport bar.
 - **Optional enrichment** (Authorization Code + PKCE) for artist artwork and genres.
+- **Self-contained by policy** — strict CSP (`default-src 'self'`), fonts bundled
+  locally (no CDN), a frame guard against clickjacking, and offline-capable via a
+  precaching service worker.
 
 ## Data flow
 
@@ -51,5 +69,6 @@ npm run dev     # start the app (runs on synthetic data until you import an expo
 ## Project status
 
 Phases 1–2 complete — offline engine, mad-lib UI, and deep-link play, plus PKCE auth,
-in-browser Web Playback SDK, and artist/track enrichment. 52 passing tests. Phase 3
-(ship polish + GitHub Pages deploy) is in progress.
+in-browser Web Playback SDK, and artist/track enrichment. Phase 3 polish underway:
+restyled Spotify-dark UI (self-hosted variable fonts, SVG iconography), six criteria
+groups, and live browser verification of the production build. 91 passing tests.

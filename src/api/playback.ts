@@ -27,6 +27,10 @@ export interface PlayerController {
   seek(positionMs: number): Promise<void>;
   /** Snapshot of the player's current state, or null if the device is idle. */
   getCurrentState(): Promise<Spotify.PlaybackState | null>;
+  /** Set the local device volume, 0..1. */
+  setVolume(volume: number): Promise<void>;
+  /** Current local device volume, 0..1. */
+  getVolume(): Promise<number>;
   disconnect(): void;
 }
 
@@ -106,6 +110,8 @@ export async function initPlayer(
         resume: () => player.resume(),
         seek: (positionMs) => player.seek(positionMs),
         getCurrentState: () => player.getCurrentState(),
+        setVolume: (volume) => player.setVolume(volume),
+        getVolume: () => player.getVolume(),
         disconnect: () => player.disconnect(),
       });
     });

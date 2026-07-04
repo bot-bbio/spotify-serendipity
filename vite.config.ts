@@ -1,26 +1,7 @@
 import preact from '@preact/preset-vite';
 import { type Plugin, defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-
-// Content-Security-Policy (VULN-005). GitHub Pages cannot set HTTP headers, so the
-// policy ships as a <meta> tag. With Phase 2 the PKCE refresh token lives in
-// localStorage, so this policy is the load-bearing barrier between a future XSS and
-// token theft. Each directive is scoped to exactly what the Spotify flow needs:
-//   connect-src  api + accounts (token exchange) + *.spotify.com / wss (SDK + Widevine)
-//   script-src   self + the Web Playback SDK loader (sdk.scdn.co)
-//   img-src      self + Spotify CDN artwork (scdn.co), data: for inlined icons
-//   frame-src    the SDK's hidden iframe (sdk.scdn.co)
-//   media-src    self + Spotify media + blob: for the EME-decrypted stream
-const CSP = [
-  "default-src 'self'",
-  "connect-src 'self' https://api.spotify.com https://accounts.spotify.com https://*.spotify.com wss://*.spotify.com",
-  "script-src 'self' https://sdk.scdn.co",
-  "img-src 'self' data: https://i.scdn.co https://*.scdn.co",
-  'frame-src https://sdk.scdn.co',
-  "media-src 'self' https://*.spotify.com blob:",
-  "object-src 'none'",
-  "base-uri 'none'",
-].join('; ');
+import { CSP } from './src/csp.js';
 
 // Inject the CSP meta into the production HTML only. The dev server relies on inline
 // scripts (the Preact refresh preamble, HMR client) that a strict policy would block,
@@ -65,6 +46,12 @@ export default defineConfig({
       // External registration script (not inline) so `script-src 'self'` allows it.
       injectRegister: 'script',
       includeAssets: ['icon.svg'],
+      workbox: {
+        // Default globs plus the latin font subsets so the app is fully styled
+        // offline. Other script subsets (cyrillic, greek, …) stay online-only —
+        // their @font-face unicode-ranges lazy-load them — keeping the precache small.
+        globPatterns: ['**/*.{js,css,html,svg}', '**/*-latin-wght-normal-*.woff2'],
+      },
       manifest: {
         name: 'Serendipity',
         short_name: 'Serendipity',

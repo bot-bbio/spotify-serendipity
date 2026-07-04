@@ -39,6 +39,8 @@ const initPlayer = vi.fn(async (handlers: import('../api/playback.js').PlayerHan
     seek: vi.fn(),
     getCurrentState,
     activateElement,
+    setVolume: vi.fn(async () => {}),
+    getVolume: vi.fn(async () => 0.8),
     disconnect: vi.fn(),
   };
 });
