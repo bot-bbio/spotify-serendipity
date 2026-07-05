@@ -252,9 +252,92 @@ export interface TopArtist {
   external_urls: { spotify: string };
 }
 
+export interface TopTrack {
+  id: string;
+  name: string;
+  uri: string;
+  album: {
+    id: string;
+    name: string;
+    images: SpotifyImage[];
+    external_urls: { spotify: string };
+  };
+  artists: { id: string; name: string }[];
+  external_urls: { spotify: string };
+}
+
 /** The user's live top artists over the given affinity window. */
 export async function getTopArtists(timeRange: TopTimeRange, limit = 50): Promise<TopArtist[]> {
   const params = new URLSearchParams({ time_range: timeRange, limit: String(limit) });
   const res = await apiGet<{ items: TopArtist[] }>(`/me/top/artists?${params.toString()}`);
   return res.items;
+}
+
+/** The user's live top tracks over the given affinity window (also feeds live albums). */
+export async function getTopTracks(timeRange: TopTimeRange, limit = 50): Promise<TopTrack[]> {
+  const params = new URLSearchParams({ time_range: timeRange, limit: String(limit) });
+  const res = await apiGet<{ items: TopTrack[] }>(`/me/top/tracks?${params.toString()}`);
+  return res.items;
+}
+
+// ---- search (artwork for export-only items) ---------------------------------
+
+export interface SearchedArt {
+  imageUrl?: string;
+  url?: string;
+}
+
+interface SearchResponse {
+  artists?: { items: { name: string; images: SpotifyImage[]; external_urls: { spotify: string } }[] };
+  albums?: { items: { name: string; images: SpotifyImage[]; external_urls: { spotify: string } }[] };
+  tracks?: {
+    items: {
+      name: string;
+      album: { images: SpotifyImage[] };
+      external_urls: { spotify: string };
+    }[];
+  };
+}
+
+/**
+ * Only ever render Spotify web links that actually point at Spotify. API
+ * responses arrive over TLS from api.spotify.com, but anything that ends up in
+ * an `href` gets scheme/host-allowlisted anyway (defense in depth vs. e.g. a
+ * `javascript:` URL smuggled through a compromised response).
+ */
+export function safeSpotifyUrl(url: string | undefined): string | undefined {
+  return url !== undefined && url.startsWith('https://open.spotify.com/') ? url : undefined;
+}
+
+/** Field filters break on embedded quotes; the names come from user exports. */
+const quoteless = (s: string): string => s.replace(/"/g, '');
+
+/**
+ * Best-effort artwork + link for an item the export knows only by name
+ * (Then vs Now "lost classics"). Uses `GET /search` with field filters and
+ * returns `null` when nothing convincing comes back — callers render the
+ * initial-letter fallback as before.
+ */
+export async function searchItemArt(
+  kind: 'artist' | 'track' | 'album',
+  name: string,
+  artist?: string,
+): Promise<SearchedArt | null> {
+  const term = quoteless(name);
+  const by = artist === undefined ? '' : ` artist:"${quoteless(artist)}"`;
+  const q = `${kind}:"${term}"${by}`;
+  const params = new URLSearchParams({ q, type: kind, limit: '1' });
+  const res = await apiGet<SearchResponse>(`/search?${params.toString()}`);
+  const item =
+    kind === 'artist'
+      ? res.artists?.items[0]
+      : kind === 'album'
+        ? res.albums?.items[0]
+        : res.tracks?.items[0];
+  if (!item || item.name.trim().toLowerCase() !== name.trim().toLowerCase()) return null;
+  const images = 'album' in item ? item.album.images : item.images;
+  return {
+    imageUrl: images[1]?.url ?? images[0]?.url,
+    url: safeSpotifyUrl(item.external_urls.spotify),
+  };
 }

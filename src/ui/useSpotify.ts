@@ -47,6 +47,18 @@ export interface SpotifyHook {
   toggleMute(): Promise<void>;
 }
 
+/**
+ * Does this SDK state belong to the track we asked for? Spotify track-relinking
+ * routinely plays a market-specific *substitute* whose `uri` differs from the
+ * requested one — `linked_from` then carries the uri we actually requested.
+ * Matching only `current_track.uri` made relinked plays look like "the player
+ * never changed track".
+ */
+function stateMatchesUri(s: Spotify.PlaybackState, uri: string): boolean {
+  const t = s.track_window.current_track;
+  return t.uri === uri || t.linked_from?.uri === uri;
+}
+
 export function useSpotify(): SpotifyHook {
   const [status, setStatus] = useState<SpotifyStatus>('anonymous');
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +77,10 @@ export function useSpotify(): SpotifyHook {
   const anchorRef = useRef({ pos: 0, at: 0, paused: true, dur: 0 });
   // Last non-zero volume, restored on unmute.
   const lastVolumeRef = useRef(0.8);
+  // When the user last seeked locally. Right after a seek the SDK briefly still
+  // reports the *pre-seek* position; without a grace window the reconcile loop
+  // read that as ">2s divergence" and snapped the scrubber back.
+  const lastSeekAtRef = useRef(0);
 
   // Push a fresh SDK state into the UI and re-anchor the local position clock.
   const applyState = useCallback((s: Spotify.PlaybackState | null): void => {
@@ -165,7 +181,7 @@ export function useSpotify(): SpotifyHook {
           const s = await controller.getCurrentState();
           if (s) {
             freshest = s;
-            if (s.track_window.current_track.uri === uri) break;
+            if (stateMatchesUri(s, uri)) break;
           }
           await new Promise((r) => setTimeout(r, 250));
         }
@@ -184,6 +200,7 @@ export function useSpotify(): SpotifyHook {
   const seek = useCallback(async (positionMs: number): Promise<void> => {
     // Move the local clock immediately so the scrubber tracks the drag, then
     // ask the SDK to seek (a cheap, local operation on the in-tab player).
+    lastSeekAtRef.current = Date.now();
     anchorRef.current = { ...anchorRef.current, pos: positionMs, at: Date.now() };
     setPosition(positionMs);
     await controllerRef.current?.seek(positionMs);
@@ -212,13 +229,16 @@ export function useSpotify(): SpotifyHook {
         if (!s) return;
         const a = anchorRef.current;
         const expectedPos = a.paused ? a.pos : a.pos + (Date.now() - a.at);
+        // A local seek needs a grace window: the SDK reports the pre-seek
+        // position for a beat, and re-applying that would yank the scrubber back.
+        const seekSettling = Date.now() - lastSeekAtRef.current < 2_500;
         const diverged =
           s.track_window.current_track.uri !== current.track_window.current_track.uri ||
           s.paused !== current.paused ||
-          Math.abs(s.position - expectedPos) > 2_000;
+          (!seekSettling && Math.abs(s.position - expectedPos) > 2_000);
         if (diverged) {
           applyState(s);
-        } else {
+        } else if (!seekSettling) {
           anchorRef.current = { pos: s.position, at: Date.now(), paused: s.paused, dur: s.duration };
         }
       });

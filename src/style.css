@@ -196,6 +196,54 @@ header h1 {
   text-align: left;
 }
 
+/* "How do I get my Spotify data?" — collapsible steps on the onboarding card. */
+.howto {
+  margin: -8px 0 24px;
+  text-align: left;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+}
+
+.howto summary {
+  cursor: pointer;
+  font-weight: 650;
+  color: var(--text);
+  padding: 2px 0;
+}
+
+.howto summary:hover {
+  color: var(--accent-hover);
+}
+
+.howto ol {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  line-height: 1.55;
+}
+
+.howto a {
+  color: var(--accent-hover);
+  text-decoration: none;
+}
+
+.howto a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.howto-note {
+  margin: 12px 0 2px;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
 .filebtn {
   display: inline-flex;
   align-items: center;
@@ -689,9 +737,9 @@ header h1 {
   gap: 10px;
   width: 100%;
   margin-top: 10px;
-  padding: 12px;
+  padding: 14px;
   font-family: var(--font-ui);
-  font-size: 0.92rem;
+  font-size: 1.02rem;
   font-weight: 650;
   color: var(--text-secondary);
   background: transparent;
@@ -714,8 +762,8 @@ header h1 {
 
 .capsule-done {
   margin: 10px 0 0;
-  padding: 12px 18px;
-  font-size: 0.9rem;
+  padding: 14px 18px;
+  font-size: 1rem;
   color: var(--text-secondary);
   background: var(--accent-soft);
   border: 1px solid rgba(29, 185, 84, 0.35);
@@ -788,8 +836,17 @@ header h1 {
   animation: rise 0.3s var(--ease-out);
 }
 
+.tvn-entities {
+  margin-bottom: 8px;
+}
+
 .tvn-ranges {
   margin-bottom: 6px;
+}
+
+.tvn-note {
+  font-size: 0.78rem;
+  margin: 8px 2px 0;
 }
 
 .tvn-loading,
@@ -856,6 +913,11 @@ a.tvn-artist:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
+/* Songs and albums wear their (square) cover art, artists stay round. */
+.tvn-avatar.tvn-sq {
+  border-radius: 8px;
+}
+
 .tvn-initial {
   display: inline-flex;
   align-items: center;
@@ -866,10 +928,24 @@ a.tvn-artist:hover {
   font-size: 0.95rem;
 }
 
+.tvn-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .tvn-name {
   font-weight: 600;
   font-size: 0.92rem;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tvn-by {
+  font-size: 0.78rem;
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1058,7 +1134,15 @@ a.tvn-artist:hover {
   gap: 5px;
 }
 
+/* Row above the scrubber: track metadata on the left, volume on the right. */
+.pb-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .pb-meta {
+  flex: 1;
   min-width: 0;
 }
 
@@ -1098,17 +1182,25 @@ a.tvn-artist:hover {
   text-align: right;
 }
 
+/*
+ * Range inputs (seek + volume). The played portion is painted via the `--fill`
+ * custom property the component sets inline, and the thumb is always visible —
+ * an opacity-on-hover thumb never appears at all on touch screens, which read
+ * as "there's no dot showing where the song is".
+ */
 .pb-range {
+  --fill: 0%; /* played fraction; overridden inline by the component */
   appearance: none;
   -webkit-appearance: none;
   min-width: 0;
-  height: 4px;
+  height: 16px; /* generous hit target; the drawn track stays 4px */
   background: transparent;
   cursor: pointer;
   outline: none;
   border: none;
   margin: 0;
   padding: 0;
+  touch-action: none; /* dragging the thumb must scrub, not scroll the page */
 }
 
 .pb-seek {
@@ -1118,13 +1210,12 @@ a.tvn-artist:hover {
 .pb-range::-webkit-slider-runnable-track {
   width: 100%;
   height: 4px;
-  background: var(--surface-3);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--fill, 0%),
+    var(--surface-3) var(--fill, 0%) 100%
+  );
   border-radius: 2px;
-  transition: background-color 0.2s var(--ease);
-}
-
-.pb-range:hover::-webkit-slider-runnable-track {
-  background: rgba(255, 255, 255, 0.25);
 }
 
 .pb-range::-webkit-slider-thumb {
@@ -1136,13 +1227,12 @@ a.tvn-artist:hover {
   background: #ffffff;
   margin-top: -4px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  transition: opacity 0.2s var(--ease);
+  transition: transform 0.15s var(--ease);
 }
 
 .pb-range:hover::-webkit-slider-thumb,
 .pb-range:focus-visible::-webkit-slider-thumb {
-  opacity: 1;
+  transform: scale(1.2);
 }
 
 .pb-range::-moz-range-track {
@@ -1150,11 +1240,12 @@ a.tvn-artist:hover {
   height: 4px;
   background: var(--surface-3);
   border-radius: 2px;
-  transition: background-color 0.2s var(--ease);
 }
 
-.pb-range:hover::-moz-range-track {
-  background: rgba(255, 255, 255, 0.25);
+.pb-range::-moz-range-progress {
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
 }
 
 .pb-range::-moz-range-thumb {
@@ -1164,20 +1255,19 @@ a.tvn-artist:hover {
   border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  transition: opacity 0.2s var(--ease);
+  transition: transform 0.15s var(--ease);
 }
 
 .pb-range:hover::-moz-range-thumb,
 .pb-range:focus-visible::-moz-range-thumb {
-  opacity: 1;
+  transform: scale(1.2);
 }
 
-/* Volume cluster: mute toggle + a compact slider */
+/* Volume cluster: mute toggle + slider, top-right of the bar (above the scrubber). */
 .pb-vol {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex: none;
 }
 
@@ -1201,10 +1291,16 @@ a.tvn-artist:hover {
 }
 
 .pb-volume {
-  width: 72px;
+  width: 120px;
 }
 
 @media (max-width: 540px) {
+  .pb-volume {
+    width: 84px; /* narrower, but still directly draggable */
+  }
+}
+
+@media (max-width: 400px) {
   .pb-volume {
     display: none; /* mute still available; a slider this small isn't usable */
   }

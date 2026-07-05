@@ -87,7 +87,13 @@ describe('in-browser player controls', () => {
     fireEvent.click(toggleBtn);
     expect(toggle).toHaveBeenCalledTimes(1);
 
+    // Dragging previews the position without committing (otherwise the live
+    // ticker fights the drag); the seek is committed on release (change).
     fireEvent.input(range, { target: { value: '30000' } });
+    expect(seek).not.toHaveBeenCalled();
+    const elapsed = document.querySelector('.pb-time');
+    expect(elapsed?.textContent).toBe('0:30'); // drag preview drives the readout
+    fireEvent.change(range, { target: { value: '30000' } });
     expect(seek).toHaveBeenCalledWith(30_000);
 
     // Volume: slider reflects the hook (0.8 -> 80) and both controls are wired.

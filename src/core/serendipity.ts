@@ -358,17 +358,24 @@ export class Engine {
     return best >= 0 ? this.ds.dicts.tracks[best].uri : undefined;
   }
 
-  /** The export's heaviest artists by qualified plays (for Then vs Now). */
-  topArtists(limit: number): Candidate[] {
-    return this.entityStats('artist')
+  /** The export's heaviest entities by qualified plays (Then vs Now's "then" side). */
+  topEntities(kind: EntityKind, limit: number): Candidate[] {
+    return this.entityStats(kind)
       .sort((a, b) => b.qualified - a.qualified)
       .slice(0, limit)
-      .map((s) => this.toCandidate('artist', s));
+      .map((s) => this.toCandidate(kind, s));
   }
 
-  /** Every artist name in the export (Then vs Now's "never played" check). */
-  allArtistNames(): readonly string[] {
-    return this.ds.dicts.artists;
+  /**
+   * Name + qualified plays for *every* entity in the export — Then vs Now's
+   * "was this ever (meaningfully) played?" check. Songs and albums carry their
+   * owning artist so callers can join on name+artist.
+   */
+  allEntityPlays(kind: EntityKind): { name: string; artist?: string; plays: number }[] {
+    return this.entityStats(kind).map((s) => {
+      const c = this.toCandidate(kind, s);
+      return { name: c.label, artist: kind === 'artist' ? undefined : c.artist, plays: c.qualified };
+    });
   }
 
   // ---- dataset introspection (drives the UI's param controls) -------------

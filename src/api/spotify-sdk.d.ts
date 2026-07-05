@@ -41,6 +41,11 @@ declare namespace Spotify {
     duration_ms: number;
     album: Album;
     artists: Artist[];
+    /**
+     * Present when Spotify track-relinking substituted a market-specific
+     * version: `uri` is the *played* track, `linked_from` the one requested.
+     */
+    linked_from?: { uri: string | null; id: string | null };
   }
 
   interface PlaybackState {

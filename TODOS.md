@@ -1,6 +1,40 @@
 # Serendipity — Open TODOs
 
-_Last updated: 2026-07-04 (Spotify showcase pass: Time Capsules, Then vs Now, ♥ save + queue)_
+_Last updated: 2026-07-04 (fix pass: Then vs Now entities + artwork, capsule naming
+schema, player scrubber/volume rework, onboarding data instructions, audit pass 3)_
+
+## Shipped 2026-07-04 — fix pass (user-reported)
+
+- **Then vs Now / New era empty**: root cause — "new era" required *zero* plays in the
+  entire export, which a current export never satisfies. Now a threshold
+  (`NEW_ERA_MAX_PLAYS = 2` qualified plays) in `src/core/thenVsNow.ts`.
+- **Then vs Now / Lost classics artwork**: lost items exist only in the export (no
+  images) — now enriched best-effort via `GET /search` (`searchItemArt`), cached per
+  session, name-match guarded.
+- **Then vs Now / entities**: Artists / Songs / Albums toggle. Songs via
+  `GET /me/top/tracks`; live albums *derived* from top tracks (no `/me/top/albums`
+  endpoint exists); export side via `Engine.topEntities` / `allEntityPlays`, joined on
+  name(+artist). Per entity+range cache.
+- **Layout**: result card + Then vs Now now render *above* the Spotify-connected bubble.
+- **Capsule naming schema** (`src/core/naming.ts`): per-criterion titles — "Throwbacks
+  from July 4", "Back in 2021", "Untouched for a year", "Late-night soundtrack"… Full
+  sentence still in the description. Generic "Serendipity · …" retained only as fallback.
+- **No 1-track playlists**: `createTimeCapsule` refuses below `MIN_CAPSULE_TRACKS = 2`
+  with a friendly message.
+- **Player scrubber**: thumb was `opacity: 0` until hover → literally invisible on touch;
+  now always visible + progress fill (`--fill`). Drag no longer snaps back: `input`
+  previews, `change` commits the seek; a 2.5 s post-seek grace window stops the reconcile
+  loop from reverting to the SDK's briefly-stale position.
+- **Player volume**: moved above the scrub bar (top-right of the bar), lengthened
+  (72→120 px; hidden only ≤400 px).
+- **Player track change**: poll now also matches `linked_from.uri` — Spotify
+  track-relinking plays a substitute URI, which made the "state for the requested track"
+  poll never match. Needs a live confirm on a real Premium session.
+- **Onboarding**: "How do I get my Spotify data?" step-by-step (request → email → zip →
+  which files to select) on the home screen + README.
+- **Security audit pass 3**: VULN-013 (API URLs → `href` now allowlisted via
+  `safeSpotifyUrl`) and VULN-014 (critical dev-only `happy-dom` advisory → upgraded to
+  v20, `npm audit` clean). See `SECURITY_AUDIT.md`.
 
 ## Shipped 2026-07-04 — Spotify API showcase
 

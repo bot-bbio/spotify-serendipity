@@ -9,14 +9,23 @@
  */
 
 import { sampleCapsuleTracks } from '../core/capsule.js';
+import { capsuleName } from '../core/naming.js';
 import { ENTITY_LABELS, renderPhrase, type QueryDescriptor } from '../core/registry.js';
 import type { Engine } from '../core/serendipity.js';
 import type { Entity } from '../types/playevent.js';
-import { addPlaylistItems, createPlaylist, uploadPlaylistCover } from '../api/spotify.js';
+import {
+  addPlaylistItems,
+  createPlaylist,
+  safeSpotifyUrl,
+  uploadPlaylistCover,
+} from '../api/spotify.js';
 import { renderCoverJpeg } from './cover.js';
 
 /** Tracks per capsule — enough to feel like a playlist, small enough to stay curated. */
 const CAPSULE_SIZE = 25;
+
+/** A one-track "playlist" isn't a playlist — below this, refuse to create one. */
+export const MIN_CAPSULE_TRACKS = 2;
 
 /** Spotify caps playlist names at 100 characters. */
 const MAX_NAME = 100;
@@ -57,9 +66,14 @@ export async function createTimeCapsule(opts: {
   if (tracks.length === 0) {
     throw new CapsuleError('No matches for this phrase — nothing to put in a playlist.');
   }
+  if (tracks.length < MIN_CAPSULE_TRACKS) {
+    throw new CapsuleError(
+      'Only one track matches this phrase — hit "Surprise me" and play it instead of making a playlist.',
+    );
+  }
 
   const sentence = capsuleSentence(descriptor, entity, param);
-  const name = `Serendipity · ${sentence}`.slice(0, MAX_NAME);
+  const name = capsuleName(descriptor, param).slice(0, MAX_NAME);
   const date = new Date().toISOString().slice(0, 10);
   const description =
     `"${sentence}" — picked from my own listening history by Serendipity on ${date}.`;
@@ -74,5 +88,10 @@ export async function createTimeCapsule(opts: {
     // Best-effort: the playlist exists and is full — ship it without custom art.
   }
 
-  return { url: playlist.external_urls.spotify, name, trackCount: tracks.length };
+  // The API's own link, allowlisted; fall back to the canonical form so the
+  // "open the playlist" link never renders an unvetted href (defense in depth).
+  const url =
+    safeSpotifyUrl(playlist.external_urls.spotify) ??
+    `https://open.spotify.com/playlist/${encodeURIComponent(playlist.id)}`;
+  return { url, name, trackCount: tracks.length };
 }

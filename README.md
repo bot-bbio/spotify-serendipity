@@ -38,10 +38,13 @@ your device and lets you query it.
   volume + mute in a floating transport bar, plus one-tap **add to queue** and a
   **♥ save** that knows whether the track is already in your library.
 - **Time Capsules** — one click turns the current phrase into a *real private
-  playlist* on your account: 25 tracks sampled from your history, plus a
-  canvas-generated cover with the phrase rendered on it.
-- **Then vs Now** — your live top artists (4-week / 6-month / ~1-year affinity)
-  joined against your export era: still on repeat, new era, lost classics.
+  playlist* on your account: up to 25 tracks sampled from your history, a
+  specific title per criterion ("Throwbacks from July 4", "Back in 2021",
+  "Late-night soundtrack"…), plus a canvas-generated cover with the phrase
+  rendered on it.
+- **Then vs Now** — your live top artists, songs, or albums (4-week / 6-month /
+  ~1-year affinity) joined against your export era: still on repeat, new era,
+  lost classics — with artwork looked up for the lost ones.
 - **Optional enrichment** (Authorization Code + PKCE) for artist artwork and genres.
 - **Self-contained by policy** — strict CSP (`default-src 'self'`), fonts bundled
   locally (no CDN), a frame guard against clickjacking, and offline-capable via a
@@ -69,10 +72,19 @@ npm run dev     # start the app (runs on synthetic data until you import an expo
 
 ## Using your own data
 
-1. Spotify → Privacy settings → *Download your data* → tick **only** "Extended
-   streaming history". Delivery takes ~1–5 days.
-2. Unzip and import the `Streaming_History_*.json` files in the app. Everything is
-   processed locally.
+The app's home screen walks through the same steps under **"How do I get my
+Spotify data?"**:
+
+1. Open [spotify.com/account/privacy](https://www.spotify.com/account/privacy/)
+   and sign in.
+2. Under **Download your data**, tick **Extended streaming history** only, and
+   press *Request data*.
+3. Confirm the request via the email Spotify sends.
+4. Wait for the "your data is ready" email (usually a few days, up to 30) and
+   download `my_spotify_data.zip`.
+5. Unzip it and import the `Streaming_History_Audio_*.json` files in the app —
+   everything is parsed and stored locally on your device, and "remove data"
+   deletes it.
 
 ## Project status
 

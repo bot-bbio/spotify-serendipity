@@ -3,7 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   addToQueue,
   getTopArtists,
+  getTopTracks,
   isInsufficientScope,
+  safeSpotifyUrl,
+  searchItemArt,
+  type SearchedArt,
   type TopTimeRange,
 } from './api/spotify.js';
 import { build } from './core/pipeline.js';
@@ -17,7 +21,12 @@ import {
 } from './core/registry.js';
 import { type Candidate, Engine } from './core/serendipity.js';
 import { buildIndex } from './core/statsIndex.js';
-import { computeThenVsNow, type ThenVsNowItem, type ThenVsNowResult } from './core/thenVsNow.js';
+import {
+  computeThenVsNow,
+  type LiveItem,
+  type ThenVsNowItem,
+  type ThenVsNowResult,
+} from './core/thenVsNow.js';
 import { clearDataset, loadDataset, saveDataset } from './db/store.js';
 import { makeSynthetic } from './fixtures/synthetic.js';
 import type { Entity } from './types/playevent.js';
@@ -210,6 +219,36 @@ export function App() {
             <code>Streaming_History_*.json</code> files from your data export) — everything
             is processed locally on your device.
           </p>
+          <details class="howto">
+            <summary>How do I get my Spotify data?</summary>
+            <ol>
+              <li>
+                Open{' '}
+                <a href="https://www.spotify.com/account/privacy/" target="_blank" rel="noreferrer">
+                  spotify.com/account/privacy
+                </a>{' '}
+                and sign in.
+              </li>
+              <li>
+                Under <strong>Download your data</strong>, tick{' '}
+                <strong>Extended streaming history</strong> (the other packages aren't needed)
+                and press <em>Request data</em>.
+              </li>
+              <li>Confirm the request via the email Spotify sends you.</li>
+              <li>
+                Wait for the "your data is ready" email — usually a few days, up to 30. Download
+                the <code>my_spotify_data.zip</code> it links to.
+              </li>
+              <li>
+                Unzip it, then press <strong>Choose export files</strong> below and select all
+                the <code>Streaming_History_Audio_*.json</code> files inside.
+              </li>
+            </ol>
+            <p class="howto-note">
+              Your export never leaves this device — it is parsed and stored locally in your
+              browser, and you can remove it at any time.
+            </p>
+          </details>
           <label class="filebtn">
             Choose export files
             <input
@@ -308,9 +347,6 @@ export function App() {
             />
           )}
 
-          <SpotifyConnect s={spotify} />
-          {spotify.error && <p class="error">{spotify.error}</p>}
-
           {result && (
             <ResultCard
               key={resultNonce}
@@ -331,6 +367,10 @@ export function App() {
           {spotify.status === 'connected' && (
             <ThenVsNowSection engine={engine} onReconnect={spotify.login} />
           )}
+
+          {/* The connect / connected-status bubble sits below all feature UI. */}
+          <SpotifyConnect s={spotify} />
+          {spotify.error && <p class="error">{spotify.error}</p>}
 
           {spotify.current && (
             <>
@@ -464,45 +504,132 @@ const TVN_RANGES: { value: TopTimeRange; label: string }[] = [
   { value: 'long_term', label: '~1 year' },
 ];
 
+type TvnEntityKind = 'artist' | 'track' | 'album';
+
+const TVN_ENTITIES: { value: TvnEntityKind; label: string }[] = [
+  { value: 'artist', label: 'Artists' },
+  { value: 'track', label: 'Songs' },
+  { value: 'album', label: 'Albums' },
+];
+
+const tvnThumb = (images: { url: string }[]): string | undefined =>
+  images[1]?.url ?? images[0]?.url;
+
+/** Live top items for an entity kind. Albums are inferred from the top tracks. */
+async function fetchLiveTop(kind: TvnEntityKind, range: TopTimeRange): Promise<LiveItem[]> {
+  if (kind === 'artist') {
+    const artists = await getTopArtists(range);
+    return artists.map((a) => ({
+      name: a.name,
+      imageUrl: tvnThumb(a.images),
+      url: safeSpotifyUrl(a.external_urls.spotify),
+    }));
+  }
+  const tracks = await getTopTracks(range);
+  if (kind === 'track') {
+    return tracks.map((t) => ({
+      name: t.name,
+      artist: t.artists[0]?.name,
+      imageUrl: tvnThumb(t.album.images),
+      url: safeSpotifyUrl(t.external_urls.spotify),
+    }));
+  }
+  // Spotify's API has no /me/top/albums — rank the albums the live top tracks
+  // sit on by how many of those tracks each contributes.
+  const byAlbum = new Map<string, { item: LiveItem; hits: number }>();
+  for (const t of tracks) {
+    const seen = byAlbum.get(t.album.id);
+    if (seen) {
+      seen.hits += 1;
+    } else {
+      byAlbum.set(t.album.id, {
+        hits: 1,
+        item: {
+          name: t.album.name,
+          artist: t.artists[0]?.name,
+          imageUrl: tvnThumb(t.album.images),
+          url: safeSpotifyUrl(t.album.external_urls.spotify),
+        },
+      });
+    }
+  }
+  return [...byAlbum.values()].sort((a, b) => b.hits - a.hits).map((e) => e.item);
+}
+
 /**
- * Then vs Now: the user's live top artists (Web API) joined against their
- * export-era heavyweights (local index). Fetches lazily on first expand so an
- * under-scoped session sees a reconnect offer only when it asks for the panel.
+ * Artwork found (or not) per lost-classic item, cached for the session so
+ * flipping ranges/entities never re-searches the same name.
+ */
+const lostArtCache = new Map<string, SearchedArt | null>();
+
+/**
+ * "Lost classics" exist only in the export, which carries no artwork — search
+ * the live API for their image + link, best-effort. `apply` receives a new
+ * result object only when something was actually found.
+ */
+function enrichLostArt(
+  kind: TvnEntityKind,
+  result: ThenVsNowResult,
+  apply: (updated: ThenVsNowResult) => void,
+): void {
+  const pending = result.lost.filter((i) => !i.imageUrl);
+  if (pending.length === 0) return;
+  void Promise.all(
+    result.lost.map(async (i) => {
+      if (i.imageUrl) return i;
+      const key = `${kind}\0${i.name}\0${i.artist ?? ''}`;
+      if (!lostArtCache.has(key)) {
+        // Best-effort: a failed search just leaves the initial-letter avatar.
+        lostArtCache.set(key, await searchItemArt(kind, i.name, i.artist).catch(() => null));
+      }
+      const art = lostArtCache.get(key);
+      return art ? { ...i, imageUrl: art.imageUrl, url: art.url ?? i.url } : i;
+    }),
+  ).then((lost) => {
+    if (lost.some((item, idx) => item !== result.lost[idx])) apply({ ...result, lost });
+  });
+}
+
+/**
+ * Then vs Now: the user's live top artists / songs / albums (Web API) joined
+ * against their export-era heavyweights (local index). Fetches lazily on first
+ * expand so an under-scoped session sees a reconnect offer only when it asks
+ * for the panel; each entity+range combination is fetched once and cached.
  */
 function ThenVsNowSection({ engine, onReconnect }: { engine: Engine; onReconnect: () => void }) {
   const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<TvnEntityKind>('artist');
   const [range, setRange] = useState<TopTimeRange>('medium_term');
-  const [results, setResults] = useState<ReadonlyMap<TopTimeRange, ThenVsNowResult>>(new Map());
+  const [results, setResults] = useState<ReadonlyMap<string, ThenVsNowResult>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scopeBlocked, setScopeBlocked] = useState(false);
 
+  const cacheKey = `${kind}:${range}`;
+
   useEffect(() => {
-    if (!open || results.has(range) || scopeBlocked) return;
+    if (!open || results.has(cacheKey) || scopeBlocked) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getTopArtists(range)
+    fetchLiveTop(kind, range)
       .then((live) => {
         if (cancelled) return;
-        const exportTop = engine
-          .topArtists(75)
-          .map((c) => ({ name: c.label, plays: c.qualified }));
-        const result = computeThenVsNow(
-          exportTop,
-          engine.allArtistNames(),
-          live.map((a) => ({
-            name: a.name,
-            imageUrl: a.images[1]?.url ?? a.images[0]?.url,
-            url: a.external_urls.spotify,
-          })),
-        );
-        setResults((prev) => new Map(prev).set(range, result));
+        const exportTop = engine.topEntities(kind, 75).map((c) => ({
+          name: c.label,
+          artist: kind === 'artist' ? undefined : c.artist,
+          plays: c.qualified,
+        }));
+        const result = computeThenVsNow(exportTop, engine.allEntityPlays(kind), live);
+        setResults((prev) => new Map(prev).set(cacheKey, result));
+        enrichLostArt(kind, result, (updated) => {
+          if (!cancelled) setResults((prev) => new Map(prev).set(cacheKey, updated));
+        });
       })
       .catch((e) => {
         if (cancelled) return;
         if (isInsufficientScope(e)) setScopeBlocked(true);
-        else setError('Could not load your live top artists — try again in a moment.');
+        else setError('Could not load your live top items — try again in a moment.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -510,9 +637,10 @@ function ThenVsNowSection({ engine, onReconnect }: { engine: Engine; onReconnect
     return () => {
       cancelled = true;
     };
-  }, [open, range, results, scopeBlocked, engine]);
+  }, [open, cacheKey, kind, range, results, scopeBlocked, engine]);
 
-  const result = results.get(range);
+  const result = results.get(cacheKey);
+  const noun = kind === 'artist' ? 'names' : kind === 'track' ? 'songs' : 'albums';
   return (
     <section class="tvn">
       <button class="tvn-toggle" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen(!open)}>
@@ -521,6 +649,19 @@ function ThenVsNowSection({ engine, onReconnect }: { engine: Engine; onReconnect
       </button>
       {open && (
         <div class="tvn-body">
+          <div class="segmented tvn-entities" role="tablist">
+            {TVN_ENTITIES.map((e) => (
+              <button
+                type="button"
+                class="seg"
+                role="tab"
+                aria-selected={e.value === kind ? 'true' : 'false'}
+                onClick={() => setKind(e.value)}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
           <div class="segmented tvn-ranges" role="tablist">
             {TVN_RANGES.map((r) => (
               <button
@@ -534,24 +675,30 @@ function ThenVsNowSection({ engine, onReconnect }: { engine: Engine; onReconnect
               </button>
             ))}
           </div>
-          {scopeBlocked && <ReconnectHint feature="your live top artists" onReconnect={onReconnect} />}
+          {kind === 'album' && (
+            <p class="muted tvn-note">Live albums are inferred from your top tracks.</p>
+          )}
+          {scopeBlocked && <ReconnectHint feature="your live top items" onReconnect={onReconnect} />}
           {error && <p class="error">{error}</p>}
           {loading && <p class="muted tvn-loading">Comparing eras…</p>}
           {result && !loading && (
             <>
               <TvnGroup
+                kind={kind}
                 title="Still on repeat"
                 hint="big in your export, big right now"
                 items={result.still}
                 empty="No overlap — your rotation has completely turned over."
               />
               <TvnGroup
+                kind={kind}
                 title="New era"
-                hint="in your rotation now, never once in your export"
+                hint="in your rotation now, missing from your export"
                 items={result.newEra}
-                empty="No brand-new names — everything you play now, past-you knew."
+                empty={`No brand-new ${noun} — everything you play now, past-you knew.`}
               />
               <TvnGroup
+                kind={kind}
                 title="Lost classics"
                 hint="export heavyweights gone from your rotation"
                 items={result.lost}
@@ -566,11 +713,13 @@ function ThenVsNowSection({ engine, onReconnect }: { engine: Engine; onReconnect
 }
 
 function TvnGroup({
+  kind,
   title,
   hint,
   items,
   empty,
 }: {
+  kind: TvnEntityKind;
   title: string;
   hint: string;
   items: ThenVsNowItem[];
@@ -588,7 +737,7 @@ function TvnGroup({
         <ul class="tvn-list">
           {items.map((a) => (
             <li>
-              <TvnArtist a={a} />
+              <TvnItem a={a} kind={kind} />
             </li>
           ))}
         </ul>
@@ -597,17 +746,22 @@ function TvnGroup({
   );
 }
 
-function TvnArtist({ a }: { a: ThenVsNowItem }) {
+function TvnItem({ a, kind }: { a: ThenVsNowItem; kind: TvnEntityKind }) {
+  // Artists get the round portrait treatment; songs/albums show square covers.
+  const shape = kind === 'artist' ? '' : ' tvn-sq';
   const body = (
     <>
       {a.imageUrl ? (
-        <img class="tvn-avatar" src={a.imageUrl} alt="" loading="lazy" />
+        <img class={`tvn-avatar${shape}`} src={a.imageUrl} alt="" loading="lazy" />
       ) : (
-        <span class="tvn-avatar tvn-initial" aria-hidden="true">
+        <span class={`tvn-avatar tvn-initial${shape}`} aria-hidden="true">
           {a.name.slice(0, 1).toUpperCase()}
         </span>
       )}
-      <span class="tvn-name">{a.name}</span>
+      <span class="tvn-text">
+        <span class="tvn-name">{a.name}</span>
+        {a.artist && <span class="tvn-by">{a.artist}</span>}
+      </span>
       {a.playsThen !== undefined && (
         <span class="tvn-plays">{a.playsThen.toLocaleString()} plays then</span>
       )}
@@ -913,15 +1067,38 @@ function PlayerBar({
   const track = state.track_window.current_track;
   const art = track.album.images.at(-1)?.url;
   const duration = state.duration || track.duration_ms || 0;
-  const pos = Math.min(position, duration);
+  // While the user is dragging the scrubber, the drag position drives the UI —
+  // otherwise the live position ticker yanks the thumb back mid-drag. The seek
+  // itself is committed once, on release (the `change` event).
+  const [drag, setDrag] = useState<number | null>(null);
+  const pos = drag ?? Math.min(position, duration);
+  const volPct = Math.round(volume * 100);
   const muted = volume === 0;
+  const fillPct = duration > 0 ? Math.min(100, (pos / duration) * 100) : 0;
   return (
     <div class="playerbar">
       {art && <img class="pb-art" src={art} alt="" />}
       <div class="pb-main">
-        <div class="pb-meta">
-          <div class="pb-title">{track.name}</div>
-          <div class="pb-artist">{track.artists.map((a) => a.name).join(', ')}</div>
+        <div class="pb-top">
+          <div class="pb-meta">
+            <div class="pb-title">{track.name}</div>
+            <div class="pb-artist">{track.artists.map((a) => a.name).join(', ')}</div>
+          </div>
+          <div class="pb-vol">
+            <button class="pb-mute" onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
+              {muted ? <IconVolumeMuted /> : <IconVolume />}
+            </button>
+            <input
+              class="pb-range pb-volume"
+              type="range"
+              min={0}
+              max={100}
+              value={volPct}
+              aria-label="Volume"
+              style={`--fill:${volPct}%`}
+              onInput={(e) => onVolume(Number((e.currentTarget as HTMLInputElement).value) / 100)}
+            />
+          </div>
         </div>
         <div class="pb-scrub">
           <span class="pb-time">{mmss(pos)}</span>
@@ -932,24 +1109,15 @@ function PlayerBar({
             max={duration || 1}
             value={pos}
             aria-label="Seek"
-            onInput={(e) => onSeek(Number((e.currentTarget as HTMLInputElement).value))}
+            style={`--fill:${fillPct}%`}
+            onInput={(e) => setDrag(Number((e.currentTarget as HTMLInputElement).value))}
+            onChange={(e) => {
+              onSeek(Number((e.currentTarget as HTMLInputElement).value));
+              setDrag(null);
+            }}
           />
           <span class="pb-time">{mmss(duration)}</span>
         </div>
-      </div>
-      <div class="pb-vol">
-        <button class="pb-mute" onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
-          {muted ? <IconVolumeMuted /> : <IconVolume />}
-        </button>
-        <input
-          class="pb-range pb-volume"
-          type="range"
-          min={0}
-          max={100}
-          value={Math.round(volume * 100)}
-          aria-label="Volume"
-          onInput={(e) => onVolume(Number((e.currentTarget as HTMLInputElement).value) / 100)}
-        />
       </div>
       <button class="pb-toggle" onClick={onToggle} aria-label={state.paused ? 'Play' : 'Pause'}>
         {state.paused ? <IconPlay /> : <IconPause />}
